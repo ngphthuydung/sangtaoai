@@ -1751,6 +1751,13 @@
       .result-card {
         padding: 24px 18px;
       }
+
+      .toast-notification {
+        left: 16px;
+        right: 16px;
+        max-width: none;
+        bottom: 16px;
+      }
     }
   </style>
 </head>
@@ -2893,7 +2900,22 @@
       renderNewsArticles("all");
       updateDashboardStats();
       initMobileNav();
+      initModalBackdrop();
     });
+
+    function initModalBackdrop() {
+      const modal = document.getElementById("detailModal");
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+          closeDetailModal();
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.classList.contains("active")) {
+          closeDetailModal();
+        }
+      });
+    }
 
     function initMobileNav() {
       const btn = document.getElementById("mobileMenuBtn");
@@ -3291,10 +3313,14 @@
         document.getElementById("callPhoneNumber").value = input;
         document.getElementById("callDescription").value = "Cuộc gọi lạ yêu cầu kiểm tra dấu hiệu";
         analyzeCall();
-      } else if (input.includes("@") || input.startsWith("http")) {
+      } else if (input.includes("@") || input.startsWith("http") || input.includes(".xyz") || input.includes(".top") || input.includes(".com") || input.includes(".vn")) {
         switchAnalyzerTab("pane-email");
-        if (input.includes("@")) document.getElementById("emailSender").value = input;
-        if (input.startsWith("http")) document.getElementById("emailUrl").value = input;
+        if (input.includes("@")) {
+          document.getElementById("emailSender").value = input;
+        } else {
+          document.getElementById("emailUrl").value = input;
+          document.getElementById("emailSubject").value = "Kiểm tra liên kết đáng ngờ";
+        }
         analyzeEmail();
       } else {
         switchAnalyzerTab("pane-sms");
@@ -3379,7 +3405,10 @@
        Không lưu OTP hay mật khẩu, che mờ thông tin cá nhân
        ========================================================================== */
     function saveToHistoryManual(showNotification = true) {
-      if (!AppState.lastAnalysisResult) return;
+      if (!AppState.lastAnalysisResult) {
+        if (showNotification) showToast("⚠️ Chưa có kết quả phân tích nào để lưu!");
+        return;
+      }
 
       // Kiểm tra trùng lặp
       const exists = AppState.history.find(h => h.id === AppState.lastAnalysisResult.id);
@@ -3390,6 +3419,8 @@
         localStorage.setItem("safeguard_history", JSON.stringify(AppState.history));
         updateDashboardStats();
         if (showNotification) showToast("✔ Đã lưu kết quả phân tích vào lịch sử!");
+      } else if (showNotification) {
+        showToast("✔ Bản ghi này đã được lưu trong lịch sử kiểm tra!");
       }
     }
 
