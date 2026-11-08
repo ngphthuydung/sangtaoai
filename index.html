@@ -1723,6 +1723,14 @@
       quizCompleted: false           // Đã nộp bài / xem kết quả hay chưa
     };
 
+    // Gắn vào window để hỗ trợ kiểm thử và theo dõi trạng thái
+    window.state = state;
+    window.QUIZ_QUESTIONS = QUIZ_QUESTIONS;
+    window.LESSONS_DATA = LESSONS_DATA;
+    window.switchLessonTopic = switchLessonTopic;
+    window.renderQuestion = renderQuestion;
+    window.showQuizResults = showQuizResults;
+
     /* ==========================================================================
        D. KHỞI TẠO VÀ XỬ LÝ MENU / ĐIỀU HƯỚNG
        ========================================================================== */
