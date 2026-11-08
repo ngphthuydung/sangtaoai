@@ -1,0 +1,2237 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyBuddy – Học hiểu, luyện tập, tiến bộ</title>
+  <style>
+    /* ==========================================================================
+       1. CSS RESET & THIẾT KẾ TOÀN BỘ (GLOBAL STYLES)
+       Màu chủ đạo: Xanh dương (#2563EB, #1D4ED8) và Trắng (#FFFFFF, #F8FAFC)
+       Phong cách hiện đại, trực quan, chuyên nghiệp cho học sinh THPT
+       ========================================================================== */
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #60a5fa;
+      --primary-subtle: #eff6ff;
+      --primary-border: #bfdbfe;
+      
+      --accent: #0284c7;
+      --accent-soft: #e0f2fe;
+
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #94a3b8;
+      
+      --bg-body: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-alt: #f1f5f9;
+
+      --border: #e2e8f0;
+      --border-focus: #3b82f6;
+
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --success-border: #86efac;
+
+      --danger: #dc2626;
+      --danger-bg: #fee2e2;
+      --danger-border: #fca5a5;
+
+      --warning: #d97706;
+      --warning-bg: #fef3c7;
+      --warning-border: #fcd34d;
+
+      --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+      --transition: all 0.25s ease;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      line-height: 1.65;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Container chung */
+    .container {
+      width: 100%;
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    /* Tiêu đề & typography */
+    h1, h2, h3, h4 {
+      color: var(--text-main);
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    p {
+      color: var(--text-muted);
+    }
+
+    a {
+      color: var(--primary);
+      text-decoration: none;
+      transition: var(--transition);
+    }
+
+    /* Nút bấm (Buttons) lớn, chuẩn UX */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 12px 24px;
+      border-radius: var(--radius-md);
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: var(--transition);
+      min-height: 48px;
+      text-align: center;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-dark);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+    }
+
+    .btn-secondary {
+      background-color: #ffffff;
+      color: var(--primary);
+      border-color: var(--primary-border);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--primary-subtle);
+      border-color: var(--primary);
+    }
+
+    .btn-outline {
+      background-color: transparent;
+      color: var(--text-main);
+      border-color: var(--border);
+    }
+
+    .btn-outline:hover {
+      background-color: var(--bg-alt);
+      border-color: var(--text-muted);
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    /* Badge nhãn */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 12px;
+      border-radius: var(--radius-full);
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .badge-primary {
+      background-color: var(--primary-subtle);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+    }
+
+    .badge-success {
+      background-color: var(--success-bg);
+      color: var(--success);
+      border: 1px solid var(--success-border);
+    }
+
+    .badge-warning {
+      background-color: var(--warning-bg);
+      color: var(--warning);
+      border: 1px solid var(--warning-border);
+    }
+
+    /* ==========================================================================
+       2. THANH ĐIỀU HƯỚNG (NAVBAR)
+       ========================================================================== */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .navbar-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--primary);
+      letter-spacing: -0.5px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 1.2rem;
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+    }
+
+    .nav-links a:hover,
+    .nav-links a.active {
+      color: var(--primary);
+      background-color: var(--primary-subtle);
+    }
+
+    /* Nút mở menu trên di động */
+    .mobile-menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--text-main);
+      cursor: pointer;
+      padding: 6px;
+    }
+
+    /* ==========================================================================
+       3. TRANG CHỦ (HERO & TÍNH NĂNG)
+       ========================================================================== */
+    .hero-section {
+      padding: 64px 0 48px;
+      text-align: center;
+      background: linear-gradient(180deg, #ffffff 0%, var(--bg-body) 100%);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero-badge {
+      margin-bottom: 16px;
+    }
+
+    .hero-title {
+      font-size: 2.75rem;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -1px;
+      margin-bottom: 16px;
+    }
+
+    .hero-title .highlight {
+      color: var(--primary);
+      display: inline-block;
+      position: relative;
+    }
+
+    .hero-subtitle {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--primary-dark);
+      margin-bottom: 16px;
+    }
+
+    .hero-desc {
+      font-size: 1.1rem;
+      max-width: 680px;
+      margin: 0 auto 32px;
+      color: var(--text-muted);
+    }
+
+    .hero-actions {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* Thẻ tính năng (Feature cards) */
+    .features-section {
+      padding: 64px 0;
+    }
+
+    .section-header {
+      text-align: center;
+      max-width: 700px;
+      margin: 0 auto 40px;
+    }
+
+    .section-title {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px 24px;
+      transition: var(--transition);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-lg);
+      border-color: var(--primary-border);
+    }
+
+    .feature-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: var(--radius-md);
+      background-color: var(--primary-subtle);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 20px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.2rem;
+      margin-bottom: 10px;
+    }
+
+    /* ==========================================================================
+       4. CHỨC NĂNG HỌC BÀI (LESSONS)
+       4 chủ đề: Tế bào nhân sơ, nhân thực, thực vật, động vật
+       ========================================================================== */
+    .lessons-section {
+      padding: 64px 0;
+      background-color: #ffffff;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Tabs chuyển bài học */
+    .topics-nav {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 36px;
+    }
+
+    .topic-tab-btn {
+      padding: 12px 20px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: var(--bg-body);
+      color: var(--text-main);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: var(--transition);
+    }
+
+    .topic-tab-btn:hover {
+      background: var(--primary-subtle);
+      border-color: var(--primary-border);
+      color: var(--primary);
+    }
+
+    .topic-tab-btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+    }
+
+    /* Khung nội dung bài học */
+    .lesson-content-card {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+    }
+
+    .lesson-header {
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: #ffffff;
+      padding: 32px;
+    }
+
+    .lesson-header .badge {
+      background: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      border: none;
+      margin-bottom: 12px;
+    }
+
+    .lesson-header h2 {
+      color: #ffffff;
+      font-size: 1.85rem;
+      margin-bottom: 8px;
+    }
+
+    .lesson-body {
+      padding: 32px;
+    }
+
+    .lesson-block {
+      margin-bottom: 32px;
+    }
+
+    .lesson-block:last-child {
+      margin-bottom: 0;
+    }
+
+    .block-title {
+      font-size: 1.25rem;
+      color: var(--primary-dark);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 2px solid var(--primary-subtle);
+      padding-bottom: 8px;
+    }
+
+    /* Danh sách mục tiêu học tập */
+    .objectives-list {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .objectives-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: var(--primary-subtle);
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .objectives-list li span.bullet {
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    /* Lưới kiến thức trọng tâm */
+    .knowledge-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+    }
+
+    .knowledge-card {
+      background: var(--bg-body);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 18px;
+    }
+
+    .knowledge-card h4 {
+      font-size: 1.05rem;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+
+    /* Thuật ngữ */
+    .glossary-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .glossary-table th,
+    .glossary-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .glossary-table th {
+      background-color: var(--primary-subtle);
+      color: var(--primary-dark);
+      font-weight: 700;
+    }
+
+    .glossary-table tr:hover td {
+      background-color: var(--bg-body);
+    }
+
+    .term-name {
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    /* Ví dụ minh họa */
+    .example-box {
+      background: #f0fdf4;
+      border-left: 4px solid var(--success);
+      padding: 18px 20px;
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      margin-top: 10px;
+    }
+
+    .example-box h4 {
+      color: var(--success);
+      margin-bottom: 6px;
+    }
+
+    /* Chân bài học có nút chuyển sang luyện tập */
+    .lesson-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    /* ==========================================================================
+       5. CHỨC NĂNG LUYỆN TẬP TRẮC NGHIỆM (QUIZ)
+       ========================================================================== */
+    .quiz-section {
+      padding: 64px 0;
+    }
+
+    .quiz-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .quiz-card {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 36px;
+      box-shadow: var(--shadow-md);
+      position: relative;
+    }
+
+    /* Thanh tiến trình câu hỏi */
+    .quiz-progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background-color: var(--border);
+      border-radius: var(--radius-full);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .quiz-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      width: 12.5%;
+      transition: width 0.3s ease;
+    }
+
+    .quiz-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .question-counter {
+      font-weight: 700;
+      color: var(--primary);
+      font-size: 1.1rem;
+    }
+
+    .question-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 28px;
+      line-height: 1.4;
+    }
+
+    /* Danh sách 4 lựa chọn A, B, C, D */
+    .options-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .option-item {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: var(--transition);
+      background-color: #ffffff;
+      position: relative;
+    }
+
+    .option-item:hover:not(.locked) {
+      border-color: var(--primary-light);
+      background-color: var(--primary-subtle);
+    }
+
+    .option-item.selected {
+      border-color: var(--primary);
+      background-color: var(--primary-subtle);
+    }
+
+    .option-item.correct {
+      border-color: var(--success) !important;
+      background-color: var(--success-bg) !important;
+      color: var(--success) !important;
+    }
+
+    .option-item.incorrect {
+      border-color: var(--danger) !important;
+      background-color: var(--danger-bg) !important;
+      color: var(--danger) !important;
+    }
+
+    .option-item.locked {
+      cursor: default;
+    }
+
+    .option-key {
+      width: 34px;
+      height: 34px;
+      border-radius: var(--radius-sm);
+      background-color: var(--bg-alt);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      margin-right: 14px;
+      flex-shrink: 0;
+      transition: var(--transition);
+    }
+
+    .option-item.selected .option-key {
+      background-color: var(--primary);
+      color: #ffffff;
+    }
+
+    .option-item.correct .option-key {
+      background-color: var(--success);
+      color: #ffffff;
+    }
+
+    .option-item.incorrect .option-key {
+      background-color: var(--danger);
+      color: #ffffff;
+    }
+
+    .option-text {
+      font-size: 1.05rem;
+      font-weight: 500;
+    }
+
+    /* Thông báo lỗi khi chưa chọn đáp án */
+    .quiz-alert {
+      display: none;
+      background-color: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      font-weight: 600;
+      margin-bottom: 20px;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Hộp hiển thị đáp án đúng và lời giải chi tiết */
+    .explanation-card {
+      display: none;
+      background-color: var(--bg-body);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 24px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .explanation-header {
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .explanation-text {
+      color: var(--text-muted);
+      font-size: 0.98rem;
+    }
+
+    .quiz-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* ==========================================================================
+       6. KẾT QUẢ VÀ ÔN TẬP (RESULTS)
+       ========================================================================== */
+    .results-section {
+      display: none; /* Chỉ hiện sau khi hoàn thành bài quiz hoặc xem kết quả */
+      padding: 64px 0;
+      background-color: var(--bg-body);
+    }
+
+    .results-card {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      box-shadow: var(--shadow-md);
+      text-align: center;
+    }
+
+    .score-circle {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      box-shadow: 0 8px 24px rgba(37, 99, 235, 0.3);
+    }
+
+    .score-number {
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .score-total {
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+
+    .result-badge {
+      font-size: 1.1rem;
+      padding: 6px 18px;
+      margin-bottom: 16px;
+    }
+
+    .result-feedback {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 32px;
+    }
+
+    /* Danh sách câu sai */
+    .wrong-answers-container {
+      text-align: left;
+      margin-top: 36px;
+      border-top: 1px solid var(--border);
+      padding-top: 32px;
+    }
+
+    .wrong-answers-title {
+      font-size: 1.3rem;
+      color: var(--text-main);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .wrong-item-card {
+      background: var(--bg-body);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--danger);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .wrong-item-question {
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--text-main);
+    }
+
+    .wrong-item-choices {
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .wrong-item-choices .user-choice {
+      color: var(--danger);
+      font-weight: 600;
+    }
+
+    .wrong-item-choices .correct-choice {
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    .wrong-item-explain {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      background: #ffffff;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+
+    /* Nút mở bài học liên quan */
+    .btn-review-topic {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background-color: var(--primary-subtle);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      border-radius: var(--radius-sm);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .btn-review-topic:hover {
+      background-color: var(--primary);
+      color: #ffffff;
+    }
+
+    .perfect-score-banner {
+      background-color: var(--success-bg);
+      border: 1px solid var(--success-border);
+      color: var(--success);
+      padding: 24px;
+      border-radius: var(--radius-md);
+      margin-top: 24px;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    /* ==========================================================================
+       7. TRỢ LÝ HỌC TẬP (STUDY ASSISTANT)
+       Hiển thị rõ: Chưa kết nối chatbot. Không giả lập AI hoạt động.
+       ========================================================================== */
+    .assistant-section {
+      padding: 64px 0;
+      background: #ffffff;
+      border-top: 1px solid var(--border);
+    }
+
+    .assistant-card {
+      max-width: 850px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 36px;
+      background-color: var(--bg-card);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .assistant-status-box {
+      background-color: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .status-icon {
+      font-size: 1.8rem;
+      flex-shrink: 0;
+    }
+
+    .status-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #b45309;
+      margin-bottom: 6px;
+    }
+
+    .status-desc {
+      color: #92400e;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .assistant-resources h3 {
+      font-size: 1.25rem;
+      margin-bottom: 16px;
+      color: var(--primary-dark);
+    }
+
+    .tips-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .tip-card {
+      background: var(--bg-body);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .tip-card h4 {
+      font-size: 1rem;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+
+    .tip-card p {
+      font-size: 0.9rem;
+    }
+
+    /* ==========================================================================
+       8. CHÂN TRANG (FOOTER)
+       ========================================================================== */
+    .footer {
+      background-color: #0f172a;
+      color: #94a3b8;
+      padding: 48px 0 24px;
+      border-top: 1px solid #1e293b;
+    }
+
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .footer-brand {
+      color: #ffffff;
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      list-style: none;
+    }
+
+    .footer-links a {
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    .footer-links a:hover {
+      color: #ffffff;
+    }
+
+    .footer-bottom {
+      text-align: center;
+      padding-top: 24px;
+      border-top: 1px solid #1e293b;
+      font-size: 0.85rem;
+    }
+
+    /* Animation đơn giản */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ==========================================================================
+       9. RESPONSIVE DESIGN (TABLET & MOBILE)
+       ========================================================================== */
+    @media (max-width: 768px) {
+      .navbar-container {
+        height: 64px;
+      }
+
+      .mobile-menu-btn {
+        display: block;
+      }
+
+      .nav-links {
+        display: none;
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background: #ffffff;
+        flex-direction: column;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        box-shadow: var(--shadow-md);
+      }
+
+      .nav-links.show {
+        display: flex;
+      }
+
+      .nav-links a {
+        width: 100%;
+        padding: 12px;
+      }
+
+      .hero-title {
+        font-size: 2rem;
+      }
+
+      .hero-subtitle {
+        font-size: 1.1rem;
+      }
+
+      .section-title {
+        font-size: 1.6rem;
+      }
+
+      .quiz-card {
+        padding: 24px 18px;
+      }
+
+      .lesson-header,
+      .lesson-body {
+        padding: 20px 16px;
+      }
+
+      .lesson-footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .lesson-footer .btn {
+        width: 100%;
+      }
+
+      .quiz-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .quiz-actions .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ========================================================================
+       1. THANH ĐIỀU HƯỚNG (NAVBAR)
+       ======================================================================== -->
+  <header class="navbar">
+    <div class="container navbar-container">
+      <a href="#home" class="brand" aria-label="StudyBuddy Trang chủ">
+        <div class="brand-icon">🧬</div>
+        <span>StudyBuddy</span>
+      </a>
+
+      <!-- Nút đóng mở menu điện thoại -->
+      <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Mở menu">
+        ☰
+      </button>
+
+      <!-- Danh sách liên kết điều hướng -->
+      <nav>
+        <ul class="nav-links" id="navLinks">
+          <li><a href="#home" class="active">Trang chủ</a></li>
+          <li><a href="#lessons">Học bài</a></li>
+          <li><a href="#quiz">Luyện tập</a></li>
+          <li><a href="#results" id="navResultsLink">Kết quả</a></li>
+          <li><a href="#assistant">Trợ lý học tập</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- ======================================================================
+         2. TRANG CHỦ (HOME & TÍNH NĂNG)
+         ====================================================================== -->
+    <section id="home" class="hero-section">
+      <div class="container">
+        <div class="hero-badge">
+          <span class="badge badge-primary">Sinh học 10 THPT • Chuyên đề Cấu tạo tế bào</span>
+        </div>
+        <h1 class="hero-title">
+          StudyBuddy – <span class="highlight">Học hiểu, luyện tập, tiến bộ</span>
+        </h1>
+        <p class="hero-subtitle">
+          Nền tảng ôn tập thông minh, trực quan và chuẩn mực môn Sinh học
+        </p>
+        <p class="hero-desc">
+          Hệ thống hóa kiến thức về cấu trúc tế bào từ nhân sơ, nhân thực đến tế bào thực vật và động vật. Kết hợp thực hành trắc nghiệm bám sát cấu trúc đề thi, hỗ trợ phân tích đáp án chi tiết.
+        </p>
+        <div class="hero-actions">
+          <a href="#lessons" class="btn btn-primary">📖 Bắt đầu học ngay</a>
+          <a href="#quiz" class="btn btn-secondary">✍️ Luyện tập trắc nghiệm</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Các thẻ giới thiệu chức năng -->
+    <section class="features-section">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">Tính năng nổi bật của StudyBuddy</h2>
+          <p>Thiết kế dành riêng cho học sinh THPT nắm vững kiến thức Sinh học tế bào</p>
+        </div>
+
+        <div class="features-grid">
+          <!-- Thẻ 1 -->
+          <div class="feature-card">
+            <div class="feature-icon">🔬</div>
+            <h3>4 Chủ đề trọng tâm</h3>
+            <p>Hệ thống bài học chuẩn mực: Tế bào nhân sơ, nhân thực, thực vật và động vật với mục tiêu, thuật ngữ và ví dụ cụ thể.</p>
+          </div>
+
+          <!-- Thẻ 2 -->
+          <div class="feature-card">
+            <div class="feature-icon">📝</div>
+            <h3>Luyện tập trắc nghiệm</h3>
+            <p>Ngân hàng câu hỏi trắc nghiệm cố định chuẩn xác, kiểm tra kết quả tức thì kèm lời giải thích khoa học chuyên sâu.</p>
+          </div>
+
+          <!-- Thẻ 3 -->
+          <div class="feature-card">
+            <div class="feature-icon">📊</div>
+            <h3>Phân tích & Ôn tập sai</h3>
+            <p>Thống kê điểm số minh bạch, chỉ rõ câu làm sai và cung cấp nút mở ngay bài học tương ứng để lấp đầy lỗ hổng kiến thức.</p>
+          </div>
+
+          <!-- Thẻ 4 -->
+          <div class="feature-card">
+            <div class="feature-icon">🛡️</div>
+            <h3>Minh bạch & Độc lập</h3>
+            <p>Chạy thuần túy trên trình duyệt, không cần tài khoản, phản hồi trung thực về trạng thái kết nối chatbot.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         3. CHỨC NĂNG HỌC BÀI (LESSONS)
+         4 chủ đề: Tế bào nhân sơ, tế bào nhân thực, thực vật, động vật
+         ====================================================================== -->
+    <section id="lessons" class="lessons-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="badge badge-primary">Chuyên đề học tập</span>
+          <h2 class="section-title" style="margin-top: 10px;">Cấu tạo tế bào môn Sinh học</h2>
+          <p>Lựa chọn chủ đề để bắt đầu tiếp thu kiến thức trọng tâm</p>
+        </div>
+
+        <!-- Thanh chọn chủ đề -->
+        <div class="topics-nav" role="tablist">
+          <button class="topic-tab-btn active" data-topic="prokaryote" role="tab" aria-selected="true">
+            🦠 1. Tế bào nhân sơ
+          </button>
+          <button class="topic-tab-btn" data-topic="eukaryote" role="tab" aria-selected="false">
+            🧬 2. Tế bào nhân thực
+          </button>
+          <button class="topic-tab-btn" data-topic="plant" role="tab" aria-selected="false">
+            🌿 3. Tế bào thực vật
+          </button>
+          <button class="topic-tab-btn" data-topic="animal" role="tab" aria-selected="false">
+            🐾 4. Tế bào động vật
+          </button>
+        </div>
+
+        <!-- Khung chứa nội dung bài học được hiển thị động qua JS -->
+        <div id="lessonContentContainer" class="lesson-content-card">
+          <!-- Nội dung chi tiết được chèn từ JavaScript -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         4. CHỨC NĂNG LUYỆN TẬP (QUIZ)
+         Hiển thị từng câu, 4 lựa chọn, kiểm tra, giải thích, chuyển tiếp
+         ====================================================================== -->
+    <section id="quiz" class="quiz-section">
+      <div class="container quiz-container">
+        <div class="section-header">
+          <span class="badge badge-primary">Luyện tập trắc nghiệm</span>
+          <h2 class="section-title" style="margin-top: 10px;">Thử thách kiến thức Cấu tạo tế bào</h2>
+          <p>Mỗi câu chỉ được tính điểm một lần khi kiểm tra. Đọc kỹ câu hỏi trước khi chọn!</p>
+        </div>
+
+        <div class="quiz-card" id="quizCard">
+          <!-- Tiến trình làm bài -->
+          <div class="quiz-progress-bar-container">
+            <div class="quiz-progress-bar" id="quizProgressBar"></div>
+          </div>
+
+          <div class="quiz-meta">
+            <span class="question-counter" id="questionCounter">Câu hỏi 1 / 8</span>
+            <span class="badge badge-primary" id="questionTopicBadge">Chủ đề: Tế bào nhân sơ</span>
+          </div>
+
+          <!-- Nội dung câu hỏi -->
+          <h3 class="question-text" id="questionText">Đang tải câu hỏi...</h3>
+
+          <!-- Cảnh báo khi người dùng chưa chọn đáp án -->
+          <div class="quiz-alert" id="quizAlert" role="alert">
+            <span>⚠️</span>
+            <span>Vui lòng chọn một đáp án (A, B, C hoặc D) trước khi bấm kiểm tra!</span>
+          </div>
+
+          <!-- 4 Lựa chọn A, B, C, D -->
+          <div class="options-list" id="optionsList">
+            <!-- Được render bằng JavaScript -->
+          </div>
+
+          <!-- Khung hiển thị đáp án đúng & Lời giải chi tiết sau khi kiểm tra -->
+          <div class="explanation-card" id="explanationCard">
+            <div class="explanation-header" id="explanationStatus">
+              <!-- Ví dụ: ✅ Chính xác! hoặc ❌ Chưa chính xác! -->
+            </div>
+            <p class="explanation-text" id="explanationText"></p>
+          </div>
+
+          <!-- Các nút hành động -->
+          <div class="quiz-actions">
+            <button class="btn btn-primary" id="btnCheckAnswer">
+              🔍 Kiểm tra đáp án
+            </button>
+            <button class="btn btn-secondary" id="btnNextQuestion" style="display: none;">
+              Tiếp theo ➔
+            </button>
+            <button class="btn btn-primary" id="btnViewResults" style="display: none;">
+              📊 Xem kết quả bài làm
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         5. KẾT QUẢ VÀ ÔN TẬP (RESULTS)
+         Hiển thị số câu đúng/tổng, danh sách câu sai, giải thích, nút ôn tập
+         ====================================================================== -->
+    <section id="results" class="results-section">
+      <div class="container">
+        <div class="results-card">
+          <div class="score-circle">
+            <span class="score-number" id="resultScore">0</span>
+            <span class="score-total" id="resultTotal">/ 8 câu</span>
+          </div>
+
+          <span class="badge result-badge" id="resultBadge">Kết quả bài làm</span>
+          <h2 id="resultTitle" style="margin-bottom: 12px;">Đánh giá kết quả ôn tập</h2>
+          <p class="result-feedback" id="resultFeedback">
+            Bạn đã hoàn thành bài luyện tập. Xem lại các câu chưa chính xác bên dưới để ôn tập lại kiến thức nhé!
+          </p>
+
+          <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px;">
+            <button class="btn btn-primary" id="btnRestartQuiz">
+              🔄 Làm lại bài luyện tập
+            </button>
+            <a href="#lessons" class="btn btn-secondary">
+              📖 Đọc lại lý thuyết
+            </a>
+          </div>
+
+          <!-- Vùng thông báo nếu đúng 100% -->
+          <div id="perfectScoreBanner" class="perfect-score-banner" style="display: none;">
+            🎉 <strong>Xuất sắc!</strong> Bạn đã trả lời đúng 100% tất cả các câu hỏi trắc nghiệm! Hãy giữ vững phong độ này nhé!
+          </div>
+
+          <!-- Danh sách các câu làm sai để ôn tập -->
+          <div class="wrong-answers-container" id="wrongAnswersContainer">
+            <h3 class="wrong-answers-title">
+              <span>⚠️</span>
+              <span>Danh sách các câu cần ôn lại (<span id="wrongCount">0</span> câu)</span>
+            </h3>
+            <div id="wrongItemsList">
+              <!-- Render tự động bằng JavaScript -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================================
+         6. TRỢ LÝ HỌC TẬP (STUDY ASSISTANT)
+         Hiển thị rõ: Chưa kết nối chatbot. Không giả lập AI hoạt động.
+         ====================================================================== -->
+    <section id="assistant" class="assistant-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="badge badge-warning">Hỗ trợ học sinh</span>
+          <h2 class="section-title" style="margin-top: 10px;">Trợ lý học tập</h2>
+          <p>Không gian giải đáp và cẩm nang phương pháp ghi nhớ môn Sinh học</p>
+        </div>
+
+        <div class="assistant-card">
+          <!-- Hộp thông báo trạng thái minh bạch theo yêu cầu -->
+          <div class="assistant-status-box">
+            <div class="status-icon">⚠️</div>
+            <div>
+              <div class="status-title">Trạng thái: Chưa kết nối chatbot</div>
+              <div class="status-desc">
+                Hệ thống <strong>không giả lập</strong> rằng chatbot AI đang hoạt động. Tính năng đối thoại trực tuyến tự động sẽ được tích hợp khi kết nối API máy chủ chuyên dụng. Hiện tại, hãy tham khảo các mẹo ghi nhớ khoa học được biên soạn cố định bên dưới để ôn tập hiệu quả!
+              </div>
+            </div>
+          </div>
+
+          <!-- Nội dung cẩm nang ghi nhớ kiến thức tế bào -->
+          <div class="assistant-resources">
+            <h3>💡 Cẩm nang ghi nhớ nhanh Cấu tạo tế bào (Cheat-Sheet)</h3>
+            <p>Áp dụng các mẹo so sánh sau để không bao giờ bị nhầm lẫn trong bài kiểm tra:</p>
+
+            <div class="tips-grid">
+              <div class="tip-card">
+                <h4>1. Phân biệt Sơ vs Thực</h4>
+                <p><strong>Nhân sơ:</strong> "Sơ khai", chưa có màng nhân, chỉ có 1 bào quan duy nhất là ribosome 70S.<br><strong>Nhân thực:</strong> Có nhân hoàn chỉnh, hệ thống nội màng phức tạp.</p>
+              </div>
+
+              <div class="tip-card">
+                <h4>2. Bào quan chuyển hóa năng lượng</h4>
+                <p><strong>Ty thể:</strong> "Nhà máy điện" (hô hấp tạo ATP) – có ở cả động vật và thực vật.<br><strong>Lục lạp:</strong> "Nhà máy quang hợp" – chỉ có ở tế bào thực vật quang hợp.</p>
+              </div>
+
+              <div class="tip-card">
+                <h4>3. Bào quan đặc thù Động vật</h4>
+                <p><strong>Trung thể:</strong> Hình thành thoi phân bào khi tế bào động vật phân chia.<br><strong>Lysosome:</strong> Tiêu hóa nội bào, phân hủy các chất và bào quan già cỗi.</p>
+              </div>
+
+              <div class="tip-card">
+                <h4>4. Bào quan đặc thù Thực vật</h4>
+                <p><strong>Thành cellulose:</strong> Tạo hình dạng cố định và bảo vệ tế bào.<br><strong>Không bào trung tâm lớn:</strong> Chứa dịch tế bào, tạo áp suất trương giúp cây đứng thẳng.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       7. CHÂN TRANG (FOOTER)
+       ======================================================================== -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div>
+          <div class="footer-brand">🧬 StudyBuddy</div>
+          <p style="color: #64748b; font-size: 0.9rem; margin-top: 6px;">Học hiểu, luyện tập, tiến bộ – Đồng hành cùng học sinh THPT.</p>
+        </div>
+        <ul class="footer-links">
+          <li><a href="#home">Trang chủ</a></li>
+          <li><a href="#lessons">Học bài</a></li>
+          <li><a href="#quiz">Luyện tập</a></li>
+          <li><a href="#assistant">Trợ lý học tập</a></li>
+        </ul>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 StudyBuddy. Dự án giáo dục mở môn Sinh học lớp 10 THPT. Thiết kế với HTML, CSS và JavaScript thuần.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ========================================================================
+       8. JAVASCRIPT THUẦN (LOGIC ĐIỀU HƯỚNG, NỘI DUNG, LUYỆN TẬP VÀ KẾT QUẢ)
+       ======================================================================== -->
+  <script>
+    /* ==========================================================================
+       A. DỮ LIỆU CỐ ĐỊNH: 4 CHỦ ĐỀ BÀI HỌC
+       Không sinh ngẫu nhiên, chuẩn chương trình Sinh học 10 THPT
+       ========================================================================== */
+    const LESSONS_DATA = {
+      prokaryote: {
+        id: "prokaryote",
+        badge: "Chủ đề 1",
+        title: "Tế bào nhân sơ (Prokaryotic Cell)",
+        subtitle: "Đại diện tiêu biểu: Vi khuẩn (Bacteria) và Vi khuẩn cổ (Archaea)",
+        objectives: [
+          "Mô tả được các đặc điểm chung nổi bật của tế bào nhân sơ (kích thước, cấu trúc đơn giản, tốc độ sinh sản).",
+          "Trình bày được cấu tạo và chức năng của thành tế bào peptidoglycan, màng sinh chất và vùng nhân.",
+          "Phân biệt được vai trò của plasmid, vỏ nhầy, lông (nhung mao) và roi (tiên mao)."
+        ],
+        knowledge: [
+          {
+            title: "1. Kích thước và tỉ lệ S/V lớn",
+            content: "Kích thước rất nhỏ (dao động từ 1 – 5 µm), chỉ bằng khoảng 1/10 tế bào nhân thực. Tỉ lệ diện tích bề mặt trên thể tích (S/V) lớn giúp tế bào trao đổi chất với môi trường nhanh, sinh trưởng và phân chia cực kỳ nhanh chóng."
+          },
+          {
+            title: "2. Thành tế bào & Vỏ nhầy",
+            content: "Thành tế bào được cấu tạo chủ yếu từ Peptidoglycan (chuỗi carbohydrate liên kết với peptide ngắn), quy định hình dạng và bảo vệ tế bào. Vi khuẩn Gram dương (Gr+) có thành dày bắt màu tím; Gram âm (Gr-) có thành mỏng bắt màu đỏ. Bên ngoài có thể có thêm lớp vỏ nhầy (capsule) bảo vệ vi khuẩn khỏi bị thực bào."
+          },
+          {
+            title: "3. Tế bào chất & Ribosome 70S",
+            content: "Tế bào chất không có hệ thống nội màng, không có các bào quan có màng bao bọc (như ty thể, lục lạp, lưới nội chất). Bào quan duy nhất hiện diện là ribosome loại nhỏ 70S làm nhiệm vụ tổng hợp protein."
+          },
+          {
+            title: "4. Vùng nhân & Plasmid",
+            content: "Chưa có màng nhân bọc vật chất di truyền (chỉ gọi là vùng nhân - nucleoid). Vật chất di truyền là một phân tử ADN dạng vòng kép duy nhất. Ngoài ra, tế bào còn có thể chứa các phân tử ADN nhỏ dạng vòng gọi là Plasmid mang gen kháng kháng sinh."
+          }
+        ],
+        glossary: [
+          { term: "Peptidoglycan", desc: "Hợp chất đại phân tử cấu tạo nên thành tế bào của hầu hết các vi khuẩn." },
+          { term: "Vùng nhân (Nucleoid)", desc: "Khu vực chứa ADN của tế bào nhân sơ, chưa có màng nhân bao bọc." },
+          { term: "Plasmid", desc: "Phân tử ADN nhỏ, kép, dạng vòng nằm trong tế bào chất, có khả năng tự nhân đôi độc lập." },
+          { term: "Ribosome 70S", desc: "Bào quan không có màng ở tế bào nhân sơ, kích thước nhỏ hơn ribosome 80S của tế bào nhân thực." }
+        ],
+        example: {
+          title: "Ví dụ minh họa & Ứng dụng y học:",
+          content: "Vi khuẩn đường ruột Escherichia coli (E. coli) phân chia mỗi 20 phút trong điều kiện tối ưu nhờ tỉ lệ S/V lớn. Kháng sinh Penicillin điều trị nhiễm khuẩn bằng cách ức chế quá trình tổng hợp thành Peptidoglycan, khiến tế bào vi khuẩn bị trương phồng và vỡ ra dưới áp suất thẩm thấu."
+        }
+      },
+
+      eukaryote: {
+        id: "eukaryote",
+        badge: "Chủ đề 2",
+        title: "Tế bào nhân thực (Eukaryotic Cell)",
+        subtitle: "Đại diện: Nấm, Nguyên sinh vật, Thực vật và Động vật",
+        objectives: [
+          "Trình bày được cấu trúc và chức năng của nhân chính thức có màng kép bao bọc.",
+          "Phân biệt được cấu tạo và chức năng của các bào quan có màng: lưới nội chất, bộ máy Golgi, ty thể.",
+          "Hiểu được cơ chế phối hợp giữa các bào quan trong quá trình sinh tổng hợp và tiết protein."
+        ],
+        knowledge: [
+          {
+            title: "1. Nhân tế bào (Nucleus)",
+            content: "Có màng kép bao bọc, trên màng có nhiều lỗ nhân kiểm soát việc trao đổi chất giữa nhân và tế bào chất. Bên trong chứa dịch nhân, chất nhiễm sắc (ADN kết hợp protein histone mang thông tin di truyền) và nhân con (nơi tổng hợp rRNA để tạo ribosome)."
+          },
+          {
+            title: "2. Hệ thống lưới nội chất (ER)",
+            content: "Gồm hệ thống màng gấp nếp tạo thành các xoang dẹt. Lưới nội chất hạt (có đính hạt ribosome 80S) chuyên tổng hợp protein màng và protein tiết. Lưới nội chất trơn (không có ribosome) chuyên tổng hợp lipid, chuyển hóa đường và giải độc cho tế bào."
+          },
+          {
+            title: "3. Bộ máy Golgi",
+            content: "Gồm chồng túi màng dẹt xếp song song độc lập. Đóng vai trò là 'trung tâm bưu điện' của tế bào: tiếp nhận sản phẩm từ lưới nội chất, gắn thêm nhóm đường/phosphate để hoàn thiện, đóng gói vào túi tiết và phân phối đến các vị trí đích."
+          },
+          {
+            title: "4. Ty thể (Mitochondria) – Nhà máy năng lượng",
+            content: "Bào quan có màng kép. Màng ngoài trơn nhẵn, màng trong gấp nếp sâu tạo thành các mào (cristae) chứa phức hệ enzyme hô hấp tế bào. Chất nền chứa ADN vòng nhỏ và ribosome riêng. Chức năng chính: hô hấp tế bào tạo năng lượng ATP cho mọi hoạt động sống."
+          }
+        ],
+        glossary: [
+          { term: "Lỗ nhân (Nuclear Pore)", desc: "Các phức hệ protein xuyên qua màng kép của nhân, cho phép mRNA và phân tử đi qua." },
+          { term: "Chất nhiễm sắc (Chromatin)", desc: "Phức hợp gồm phân tử ADN sợi kép kết hợp với protein loại histone." },
+          { term: "Mào cristae", desc: "Các nếp gấp của màng trong ty thể giúp tăng diện tích bề mặt chứa enzyme tổng hợp ATP." },
+          { term: "Lysosome", desc: "Bào quan màng đơn chứa enzyme thủy phân axit, làm nhiệm vụ tiêu hóa nội bào." }
+        ],
+        example: {
+          title: "Ví dụ minh họa & Phối hợp bào quan:",
+          content: "Tế bào tuyến tụy sản xuất hormone insulin: Gene được phiên mã thành mRNA tại nhân -> Ribosome trên lưới nội chất hạt dịch mã tạo chuỗi polypeptide -> Đóng gói chuyển sang bộ máy Golgi để hoàn thiện cấu trúc -> Xuất bào vào máu qua màng sinh chất."
+        }
+      },
+
+      plant: {
+        id: "plant",
+        badge: "Chủ đề 3",
+        title: "Tế bào thực vật (Plant Cell)",
+        subtitle: "Tế bào nhân thực tự dưỡng quang hợp với cấu trúc bảo vệ đặc thù",
+        objectives: [
+          "Xác định được 3 đặc điểm cấu tạo nổi bật chỉ có ở tế bào thực vật: thành cellulose, lục lạp và không bào trung tâm lớn.",
+          "Mô tả cấu trúc lục lạp và vai trò của chất diệp lục trong quang hợp.",
+          "Giải thích vai trò của áp suất trương nước do không bào trung tâm tạo ra đối với hình dạng cây."
+        ],
+        knowledge: [
+          {
+            title: "1. Thành tế bào bằng Cellulose",
+            content: "Bao bọc bên ngoài màng sinh chất, cấu tạo chủ yếu từ các sợi cellulose đan xen với hemicellulose và pectin. Thành tế bào cứng chắc giúp quy định và duy trì hình dạng cố định của tế bào, bảo vệ tế bào trước áp suất thẩm thấu. Giữa các tế bào có cầu sinh chất (plasmodesmata) kết nối."
+          },
+          {
+            title: "2. Lục lạp (Chloroplast) – Bào quan quang hợp",
+            content: "Bào quan có màng kép chứa chất nền stroma và hệ thống túi dẹt tilacoit. Các tilacoit xếp chồng lên nhau tạo thành cấu trúc hạt grana. Trên màng tilacoit có sắc tố diệp lục (chlorophyll) hấp thụ ánh sáng mặt trời để thực hiện quang hợp, tổng hợp chất hữu cơ từ CO₂ và H₂O."
+          },
+          {
+            title: "3. Không bào trung tâm kích thước lớn",
+            content: "Chiếm tới 80 – 90% thể tích tế bào thực vật trưởng thành. Chứa dịch tế bào giàu nước, muối khoáng, đường, sắc tố cánh hoa và các chất dự trữ/chất độc tự vệ. Không bào hút nước tạo nên áp suất trương nước, giúp nâng đỡ cơ học cho các bộ phận non của cây."
+          },
+          {
+            title: "4. Điểm đặc trưng khác so với động vật",
+            content: "Tế bào thực vật bậc cao không có trung thể (centrosome chứa trung tử) mà hình thành thoi phân bào bằng các vi ống phân tán; thường không có lysosome (chức năng tiêu hóa nội bào do không bào đảm nhận)."
+          }
+        ],
+        glossary: [
+          { term: "Cellulose", desc: "Polysaccharide mạch thẳng gồm nhiều đơn phân glucose liên kết β-1,4-glycosidic tạo độ bền cao." },
+          { term: "Grana & Stroma", desc: "Grana là tập hợp các túi tilacoit chứa diệp lục; Stroma là chất nền của lục lạp chứa enzyme quang hợp." },
+          { term: "Áp suất trương nước", desc: "Áp suất của dịch không bào ép lên thành tế bào giúp tế bào căng phồng, thân cây đứng vững." },
+          { term: "Cầu sinh chất", desc: "Kênh tế bào chất xuyên qua thành tế bào nối liền dịch bào giữa hai tế bào thực vật liền kề." }
+        ],
+        example: {
+          title: "Hiện tượng thực tế môn Sinh học:",
+          content: "Khi một chậu cây bị thiếu nước, không bào trung tâm teo lại làm giảm áp suất trương nước, dẫn đến hiện tượng lá cây bị rũ xuống (héo). Khi tưới nước đầy đủ, không bào hút no nước làm tế bào căng phồng trở lại giúp lá cây tươi tỉnh vươn cao."
+        }
+      },
+
+      animal: {
+        id: "animal",
+        badge: "Chủ đề 4",
+        title: "Tế bào động vật (Animal Cell)",
+        subtitle: "Tế bào nhân thực dị dưỡng với màng linh hoạt và khả năng cử động đa dạng",
+        objectives: [
+          "Nêu được đặc điểm phân biệt giữa tế bào động vật và tế bào thực vật (không có thành tế bào, không có lục lạp).",
+          "Mô tả cấu trúc trung thể và vai trò quan trọng trong sự phân chia tế bào (nguyên phân, giảm phân).",
+          "Giải thích vai trò của lysosome và chất nền ngoại bào (ECM) trong việc bảo vệ và liên kết mô."
+        ],
+        knowledge: [
+          {
+            title: "1. Màng sinh chất mềm dẻo & Không có thành cellulose",
+            content: "Tế bào động vật không có thành tế bào cứng cáp nên có hình dạng mềm dẻo, linh hoạt và đa dạng (hình sao ở neuron thần kinh, hình cầu ở bạch cầu, hình đĩa lõm 2 mặt ở hồng cầu). Bên ngoài màng được bao phủ bởi chất nền ngoại bào (ECM) giàu sợi collagen và glycoprotein giúp các tế bào liên kết thành mô."
+          },
+          {
+            title: "2. Trung thể (Centrosome)",
+            content: "Gồm hai trung tử (centriole) hình trụ xếp vuông góc với nhau, được cấu tạo từ các bộ ba vi ống protein tubulin. Trung thể là trung tâm tổ chức vi ống, có nhiệm vụ hình thành thoi phân bào giúp phân ly nhiễm sắc thể trong quá trình nguyên phân và giảm phân."
+          },
+          {
+            title: "3. Hệ thống Lysosome (Tiêu thể) phát triển",
+            content: "Lysosome là các túi màng đơn chứa hơn 40 loại enzyme thủy phân hoạt động ở môi trường axit (pH ≈ 5). Giữ vai trò dọn dẹp tế bào: tiêu hóa thức ăn đưa vào từ ngoài, tiêu hủy các bào quan già hỏng (hiện tượng tự thực) và tham gia tự hủy tế bào theo chương trình."
+          },
+          {
+            title: "4. Không bào nhỏ & Chức năng dị dưỡng",
+            content: "Không có không bào trung tâm kích thước lớn như thực vật. Ở động vật nguyên sinh có các không bào co bóp để điều hòa nước hoặc không bào tiêu hóa để xử lý thức ăn. Tế bào hoàn toàn không có lục lạp."
+          }
+        ],
+        glossary: [
+          { term: "Trung thể (Centrosome)", desc: "Bào quan không có màng ở tế bào động vật, chứa 2 trung tử giúp tạo thoi vô sắc khi phân chia." },
+          { term: "Chất nền ngoại bào (ECM)", desc: "Mạng lưới phức tạp gồm protein collagen, proteoglycan bên ngoài tế bào động vật." },
+          { term: "Tự thực bào (Autophagy)", desc: "Quá trình lysosome bao bọc và tiêu hóa chính các thành phần hỏng hóc bên trong tế bào." },
+          { term: "Xuất bào & Nhập bào", desc: "Hình thức vận chuyển các đại phân tử thông qua sự biến dạng của màng sinh chất mềm dẻo." }
+        ],
+        example: {
+          title: "Ví dụ minh họa & Y sinh học:",
+          content: "Tế bào bạch cầu đại thực bào trong hệ miễn dịch người có khả năng biến hình để nuốt các vi khuẩn gây bệnh (thực bào). Sau đó, các lysosome hợp nhất với túi thực bào và tiết enzyme phân hủy hoàn toàn vi khuẩn để bảo vệ cơ thể."
+        }
+      }
+    };
+
+    /* ==========================================================================
+       B. DỮ LIỆU CỐ ĐỊNH: 8 CÂU HỎI TRẮC NGHIỆM CHUẨN SINH HỌC 10 THPT
+       Bao quát toàn bộ 4 chủ đề. Không sinh ngẫu nhiên.
+       ========================================================================== */
+    const QUIZ_QUESTIONS = [
+      {
+        id: 1,
+        topicId: "prokaryote",
+        topicName: "Tế bào nhân sơ",
+        question: "Câu 1: Thành tế bào của hầu hết các loài vi khuẩn (tế bào nhân sơ) được cấu tạo chủ yếu từ hợp chất nào sau đây?",
+        options: [
+          { key: "A", text: "Cellulose (Xenlulozơ)" },
+          { key: "B", text: "Peptidoglycan" },
+          { key: "C", text: "Chitin (Kitin)" },
+          { key: "D", text: "Phospholipid kép" }
+        ],
+        correctKey: "B",
+        explanation: "Thành tế bào vi khuẩn có thành phần hóa học chính là Peptidoglycan (chuỗi carbohydrate liên kết với peptide ngắn), có chức năng quy định hình dạng và bảo vệ tế bào khỏi bị vỡ do áp suất thẩm thấu. Cellulose là thành phần thành tế bào thực vật, còn Chitin là của nấm."
+      },
+      {
+        id: 2,
+        topicId: "prokaryote",
+        topicName: "Tế bào nhân sơ",
+        question: "Câu 2: Đặc điểm nào sau đây KHÔNG đúng đối với cấu tạo của tế bào nhân sơ?",
+        options: [
+          { key: "A", text: "Vật chất di truyền chưa có màng nhân bao bọc (chỉ có vùng nhân)" },
+          { key: "B", text: "Có chứa các bào quan có màng bao bọc như ty thể và lục lạp" },
+          { key: "C", text: "Kích thước nhỏ (khoảng 1 – 5 µm) giúp tỉ lệ S/V lớn" },
+          { key: "D", text: "Bào quan duy nhất trong tế bào chất là ribosome loại 70S" }
+        ],
+        correctKey: "B",
+        explanation: "Tế bào nhân sơ hoàn toàn KHÔNG có hệ thống nội màng và các bào quan có màng bao bọc (như ty thể, lục lạp, lưới nội chất, bộ máy Golgi). Bào quan duy nhất của tế bào nhân sơ là ribosome 70S không màng."
+      },
+      {
+        id: 3,
+        topicId: "eukaryote",
+        topicName: "Tế bào nhân thực",
+        question: "Câu 3: Bào quan nào sau đây được ví như 'nhà máy năng lượng' của tế bào nhân thực nhờ chức năng hô hấp tế bào và tổng hợp ATP?",
+        options: [
+          { key: "A", text: "Ribosome" },
+          { key: "B", text: "Bộ máy Golgi" },
+          { key: "C", text: "Ty thể (Mitochondria)" },
+          { key: "D", text: "Lysosome" }
+        ],
+        correctKey: "C",
+        explanation: "Ty thể là bào quan màng kép, màng trong gấp nếp thành các mào cristae chứa enzyme hô hấp tế bào, phân giải các hợp chất hữu cơ để tổng hợp năng lượng ATP cung cấp cho mọi hoạt động sống của tế bào."
+      },
+      {
+        id: 4,
+        topicId: "eukaryote",
+        topicName: "Tế bào nhân thực",
+        question: "Câu 4: Chức năng quan trọng hàng đầu của lưới nội chất hạt ở tế bào nhân thực là gì?",
+        options: [
+          { key: "A", text: "Tổng hợp lipid và chuyển hóa đường" },
+          { key: "B", text: "Tổng hợp các loại protein tiết và protein cấu tạo màng" },
+          { key: "C", text: "Khử độc thuốc và các chất độc hại" },
+          { key: "D", text: "Quang hợp hấp thụ ánh sáng mặt trời" }
+        ],
+        correctKey: "B",
+        explanation: "Lưới nội chất hạt có các hạt ribosome 80S đính trên bề mặt màng ngoài, chuyên phụ trách tổng hợp các chuỗi protein xuất bào (protein tiết) và protein màng. Tổng hợp lipid và giải độc là chức năng của lưới nội chất trơn."
+      },
+      {
+        id: 5,
+        topicId: "plant",
+        topicName: "Tế bào thực vật",
+        question: "Câu 5: Bào quan nào sau đây thực hiện chức năng quang hợp chuyển hóa năng lượng ánh sáng thành năng lượng hóa học, chỉ có ở tế bào thực vật quang hợp?",
+        options: [
+          { key: "A", text: "Lục lạp (Chloroplast)" },
+          { key: "B", text: "Ty thể" },
+          { key: "C", text: "Lưới nội chất" },
+          { key: "D", text: "Bộ máy Golgi" }
+        ],
+        correctKey: "A",
+        explanation: "Lục lạp là bào quan quang hợp đặc thù của tế bào thực vật và một số nguyên sinh vật tự dưỡng. Trên màng tilacoit của lục lạp chứa chất diệp lục có khả năng hấp thụ photon ánh sáng để tổng hợp glucose từ CO₂ và H₂O."
+      },
+      {
+        id: 6,
+        topicId: "plant",
+        topicName: "Tế bào thực vật",
+        question: "Câu 6: Cấu trúc nào giúp tế bào thực vật có hình dạng cố định vững chắc và bảo vệ tế bào không bị vỡ khi ở trong môi trường nhược trương?",
+        options: [
+          { key: "A", text: "Màng sinh chất giàu cholesterol" },
+          { key: "B", text: "Thành tế bào cấu tạo chủ yếu từ cellulose" },
+          { key: "C", text: "Khung xương tế bào với các sợi actin" },
+          { key: "D", text: "Chất nền ngoại bào collagen" }
+        ],
+        correctKey: "B",
+        explanation: "Thành tế bào thực vật bao bọc bên ngoài màng sinh chất, được cấu tạo từ các vi sợi cellulose đan dệt bền chắc, giúp định hình tế bào và chống lại áp suất thẩm thấu khi hút nước."
+      },
+      {
+        id: 7,
+        topicId: "animal",
+        topicName: "Tế bào động vật",
+        question: "Câu 7: Bào quan nào sau đây đóng vai trò trung tâm hình thành thoi phân bào để phân ly nhiễm sắc thể trong quá trình phân chia ở tế bào động vật?",
+        options: [
+          { key: "A", text: "Trung thể (Centrosome)" },
+          { key: "B", text: "Lục lạp" },
+          { key: "C", text: "Không bào trung tâm" },
+          { key: "D", text: "Thành tế bào" }
+        ],
+        correctKey: "A",
+        explanation: "Trung thể gồm 2 trung tử xếp vuông góc với nhau, là trung tâm tổ chức vi ống hình thành thoi vô sắc (thoi phân bào) giúp kéo các nhiễm sắc thể về 2 cực tế bào trong kỳ sau của nguyên phân và giảm phân."
+      },
+      {
+        id: 8,
+        topicId: "animal",
+        topicName: "Tế bào động vật",
+        question: "Câu 8: Điểm khác biệt cơ bản giữa tế bào động vật so với tế bào thực vật là tế bào động vật:",
+        options: [
+          { key: "A", text: "Không có nhân và không chứa vật chất di truyền ADN" },
+          { key: "B", text: "Không có thành tế bào bằng cellulose và không có lục lạp" },
+          { key: "C", text: "Không có màng sinh chất bao bọc tế bào chất" },
+          { key: "D", text: "Không có ty thể để thực hiện hô hấp tạo năng lượng" }
+        ],
+        correctKey: "B",
+        explanation: "Cả hai đều là tế bào nhân thực có màng sinh chất, nhân hoàn chỉnh và ty thể. Tuy nhiên, tế bào động vật là sinh vật dị dưỡng nên KHÔNG có lục lạp để quang hợp, và KHÔNG có thành tế bào bằng cellulose nên màng mềm dẻo có thể thay đổi hình dạng linh hoạt."
+      }
+    ];
+
+    /* ==========================================================================
+       C. TRẠNG THÁI ỨNG DỤNG (APPLICATION STATE)
+       Quản lý bài học, tiến trình làm bài trắc nghiệm, điểm số và câu sai
+       ========================================================================== */
+    const state = {
+      currentTopicId: "prokaryote",
+      currentQuestionIndex: 0,
+      selectedKey: null,             // Đáp án đang được chọn của câu hiện tại ('A' | 'B' | 'C' | 'D' | null)
+      userAnswers: {},               // Lưu đáp án người dùng đã kiểm tra: { [questionIndex]: { selectedKey, isCorrect, locked } }
+      score: 0,                      // Số câu đúng
+      quizCompleted: false           // Đã nộp bài / xem kết quả hay chưa
+    };
+
+    /* ==========================================================================
+       D. KHỞI TẠO VÀ XỬ LÝ MENU / ĐIỀU HƯỚNG
+       ========================================================================== */
+    document.addEventListener("DOMContentLoaded", () => {
+      // 1. Khởi tạo bài học đầu tiên
+      renderLessonContent(state.currentTopicId);
+
+      // 2. Khởi tạo câu hỏi trắc nghiệm đầu tiên
+      renderQuestion(state.currentQuestionIndex);
+
+      // 3. Gắn sự kiện tab bài học
+      initTopicTabs();
+
+      // 4. Gắn sự kiện các nút quiz
+      initQuizEvents();
+
+      // 5. Gắn sự kiện menu di động và cuộn mượt
+      initNavigation();
+    });
+
+    // Xử lý menu di động và active link khi bấm
+    function initNavigation() {
+      const mobileBtn = document.getElementById("mobileMenuBtn");
+      const navLinks = document.getElementById("navLinks");
+      const navAnchorLinks = navLinks.querySelectorAll("a");
+
+      mobileBtn.addEventListener("click", () => {
+        navLinks.classList.toggle("show");
+      });
+
+      navAnchorLinks.forEach(link => {
+        link.addEventListener("click", (e) => {
+          navLinks.classList.remove("show");
+          navAnchorLinks.forEach(l => l.classList.remove("active"));
+          link.classList.add("active");
+        });
+      });
+    }
+
+    /* ==========================================================================
+       E. LOGIC HIỂN THỊ BÀI HỌC (LESSON RENDERING)
+       ========================================================================== */
+    function initTopicTabs() {
+      const tabBtns = document.querySelectorAll(".topic-tab-btn");
+      tabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          const topicId = btn.getAttribute("data-topic");
+          switchLessonTopic(topicId);
+        });
+      });
+    }
+
+    function switchLessonTopic(topicId) {
+      if (!LESSONS_DATA[topicId]) return;
+      state.currentTopicId = topicId;
+
+      // Cập nhật giao diện tab
+      const tabBtns = document.querySelectorAll(".topic-tab-btn");
+      tabBtns.forEach(btn => {
+        const isTarget = btn.getAttribute("data-topic") === topicId;
+        btn.classList.toggle("active", isTarget);
+        btn.setAttribute("aria-selected", isTarget ? "true" : "false");
+      });
+
+      // Render nội dung
+      renderLessonContent(topicId);
+    }
+
+    function renderLessonContent(topicId) {
+      const data = LESSONS_DATA[topicId];
+      const container = document.getElementById("lessonContentContainer");
+
+      // Tạo HTML danh sách mục tiêu
+      const objectivesHtml = data.objectives
+        .map(obj => `<li><span class="bullet">✔</span><span>${obj}</span></li>`)
+        .join("");
+
+      // Tạo HTML kiến thức trọng tâm
+      const knowledgeHtml = data.knowledge
+        .map(item => `
+          <div class="knowledge-card">
+            <h4>${item.title}</h4>
+            <p>${item.content}</p>
+          </div>
+        `).join("");
+
+      // Tạo HTML giải thích thuật ngữ
+      const glossaryHtml = data.glossary
+        .map(term => `
+          <tr>
+            <td class="term-name">${term.term}</td>
+            <td>${term.desc}</td>
+          </tr>
+        `).join("");
+
+      // Tạo toàn bộ khung nội dung bài học
+      container.innerHTML = `
+        <div class="lesson-header">
+          <span class="badge">${data.badge}</span>
+          <h2>${data.title}</h2>
+          <p style="color: #e0f2fe; font-size: 1.05rem;">${data.subtitle}</p>
+        </div>
+
+        <div class="lesson-body">
+          <!-- 1. Mục tiêu học tập -->
+          <div class="lesson-block">
+            <h3 class="block-title">🎯 Mục tiêu học tập</h3>
+            <ul class="objectives-list">
+              ${objectivesHtml}
+            </ul>
+          </div>
+
+          <!-- 2. Kiến thức trọng tâm -->
+          <div class="lesson-block">
+            <h3 class="block-title">🧠 Kiến thức trọng tâm</h3>
+            <div class="knowledge-grid">
+              ${knowledgeHtml}
+            </div>
+          </div>
+
+          <!-- 3. Giải thích thuật ngữ -->
+          <div class="lesson-block">
+            <h3 class="block-title">📖 Giải thích thuật ngữ môn Sinh học</h3>
+            <div style="overflow-x: auto;">
+              <table class="glossary-table">
+                <thead>
+                  <tr>
+                    <th style="width: 30%;">Thuật ngữ</th>
+                    <th>Ý nghĩa & Chức năng</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${glossaryHtml}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 4. Ví dụ minh họa -->
+          <div class="lesson-block">
+            <h3 class="block-title">💡 Ví dụ thực tế</h3>
+            <div class="example-box">
+              <h4>${data.example.title}</h4>
+              <p style="color: #14532d; font-size: 0.98rem;">${data.example.content}</p>
+            </div>
+          </div>
+
+          <!-- 5. Chân bài học có nút chuyển sang luyện tập -->
+          <div class="lesson-footer">
+            <p style="font-weight: 500;">Đã nắm vững lý thuyết ${data.title}? Hãy kiểm tra kiến thức ngay!</p>
+            <button class="btn btn-primary" onclick="goToPracticeSection('${data.id}')">
+              ✍️ Chuyển sang luyện tập bài này
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Nút chuyển từ bài học sang phần luyện tập
+    window.goToPracticeSection = function(topicId) {
+      // Tìm câu hỏi đầu tiên thuộc chủ đề này
+      const targetIndex = QUIZ_QUESTIONS.findIndex(q => q.topicId === topicId);
+      if (targetIndex !== -1) {
+        state.currentQuestionIndex = targetIndex;
+        renderQuestion(state.currentQuestionIndex);
+      }
+
+      // Cuộn mượt đến phần quiz
+      const quizSection = document.getElementById("quiz");
+      quizSection.scrollIntoView({ behavior: "smooth" });
+    };
+
+    /* ==========================================================================
+       F. LOGIC LUYỆN TẬP TRẮC NGHIỆM (QUIZ LOGIC)
+       ========================================================================== */
+    function initQuizEvents() {
+      const btnCheck = document.getElementById("btnCheckAnswer");
+      const btnNext = document.getElementById("btnNextQuestion");
+      const btnViewResults = document.getElementById("btnViewResults");
+      const btnRestart = document.getElementById("btnRestartQuiz");
+
+      // Bấm nút "Kiểm tra"
+      btnCheck.addEventListener("click", checkCurrentAnswer);
+
+      // Bấm nút "Tiếp theo"
+      btnNext.addEventListener("click", () => {
+        if (state.currentQuestionIndex < QUIZ_QUESTIONS.length - 1) {
+          state.currentQuestionIndex++;
+          renderQuestion(state.currentQuestionIndex);
+        }
+      });
+
+      // Bấm nút "Xem kết quả"
+      btnViewResults.addEventListener("click", showQuizResults);
+
+      // Bấm nút "Làm lại bài luyện tập"
+      btnRestart.addEventListener("click", restartQuiz);
+    }
+
+    // Hiển thị một câu hỏi theo chỉ mục index
+    function renderQuestion(index) {
+      const q = QUIZ_QUESTIONS[index];
+      const total = QUIZ_QUESTIONS.length;
+
+      // 1. Cập nhật thanh tiến trình & meta
+      const progressBar = document.getElementById("quizProgressBar");
+      progressBar.style.width = `${((index + 1) / total) * 100}%`;
+
+      document.getElementById("questionCounter").textContent = `Câu hỏi ${index + 1} / ${total}`;
+      document.getElementById("questionTopicBadge").textContent = `Chủ đề: ${q.topicName}`;
+      document.getElementById("questionText").textContent = q.question;
+
+      // 2. Ẩn thông báo lỗi & hộp giải thích ban đầu
+      document.getElementById("quizAlert").style.display = "none";
+      const explanationCard = document.getElementById("explanationCard");
+      explanationCard.style.display = "none";
+
+      // 3. Kiểm tra xem câu này đã từng được kiểm tra chưa
+      const prevAnswer = state.userAnswers[index];
+      state.selectedKey = prevAnswer ? prevAnswer.selectedKey : null;
+
+      // 4. Render danh sách 4 lựa chọn A, B, C, D
+      const optionsContainer = document.getElementById("optionsList");
+      optionsContainer.innerHTML = "";
+
+      q.options.forEach(opt => {
+        const optionEl = document.createElement("div");
+        optionEl.className = "option-item";
+        optionEl.setAttribute("data-key", opt.key);
+
+        // Nếu câu hỏi đã bị khóa (đã bấm kiểm tra trước đó)
+        if (prevAnswer && prevAnswer.locked) {
+          optionEl.classList.add("locked");
+          if (opt.key === q.correctKey) {
+            optionEl.classList.add("correct");
+          } else if (opt.key === prevAnswer.selectedKey) {
+            optionEl.classList.add("incorrect");
+          }
+        } else if (state.selectedKey === opt.key) {
+          optionEl.classList.add("selected");
+        }
+
+        optionEl.innerHTML = `
+          <div class="option-key">${opt.key}</div>
+          <div class="option-text">${opt.text}</div>
+        `;
+
+        // Sự kiện click chọn đáp án (chỉ khi chưa bị khóa)
+        optionEl.addEventListener("click", () => {
+          if (prevAnswer && prevAnswer.locked) return;
+          selectOption(opt.key);
+        });
+
+        optionsContainer.appendChild(optionEl);
+      });
+
+      // 5. Cập nhật trạng thái các nút bấm
+      const btnCheck = document.getElementById("btnCheckAnswer");
+      const btnNext = document.getElementById("btnNextQuestion");
+      const btnViewResults = document.getElementById("btnViewResults");
+
+      if (prevAnswer && prevAnswer.locked) {
+        // Đã kiểm tra câu này rồi -> vô hiệu hóa nút kiểm tra
+        btnCheck.disabled = true;
+        btnCheck.style.display = "none";
+
+        // Hiển thị lại lời giải
+        showExplanationBox(prevAnswer.isCorrect, q.correctKey, q.explanation);
+
+        // Hiển thị nút Tiếp theo hoặc Xem kết quả
+        if (index < total - 1) {
+          btnNext.style.display = "inline-flex";
+          btnViewResults.style.display = "none";
+        } else {
+          btnNext.style.display = "none";
+          btnViewResults.style.display = "inline-flex";
+        }
+      } else {
+        // Chưa kiểm tra câu này
+        btnCheck.disabled = false;
+        btnCheck.style.display = "inline-flex";
+        btnNext.style.display = "none";
+        btnViewResults.style.display = "none";
+      }
+    }
+
+    // Chọn một lựa chọn
+    function selectOption(key) {
+      state.selectedKey = key;
+
+      // Ẩn cảnh báo lỗi nếu có
+      document.getElementById("quizAlert").style.display = "none";
+
+      // Cập nhật class 'selected' trên giao diện
+      const optionItems = document.querySelectorAll(".option-item");
+      optionItems.forEach(item => {
+        const itemKey = item.getAttribute("data-key");
+        item.classList.toggle("selected", itemKey === key);
+      });
+    }
+
+    // Kiểm tra câu trả lời
+    function checkCurrentAnswer() {
+      const index = state.currentQuestionIndex;
+      const q = QUIZ_QUESTIONS[index];
+      const alertBox = document.getElementById("quizAlert");
+
+      // YÊU CẦU: Nếu chưa chọn đáp án, nhắc người dùng chọn
+      if (!state.selectedKey) {
+        alertBox.style.display = "flex";
+        return;
+      }
+      alertBox.style.display = "none";
+
+      const isCorrect = (state.selectedKey === q.correctKey);
+
+      // YÊU CẦU: Mỗi câu chỉ được tính điểm một lần duy nhất
+      if (!state.userAnswers[index]) {
+        if (isCorrect) {
+          state.score++;
+        }
+      }
+
+      // Lưu trạng thái đã trả lời và khóa câu hỏi
+      state.userAnswers[index] = {
+        questionId: q.id,
+        topicId: q.topicId,
+        topicName: q.topicName,
+        questionText: q.question,
+        selectedKey: state.selectedKey,
+        correctKey: q.correctKey,
+        isCorrect: isCorrect,
+        explanation: q.explanation,
+        locked: true
+      };
+
+      // Đổi màu các lựa chọn (Đúng: Xanh, Sai: Đỏ)
+      const optionItems = document.querySelectorAll(".option-item");
+      optionItems.forEach(item => {
+        item.classList.add("locked");
+        const key = item.getAttribute("data-key");
+        if (key === q.correctKey) {
+          item.classList.add("correct");
+        } else if (key === state.selectedKey && !isCorrect) {
+          item.classList.add("incorrect");
+        }
+      });
+
+      // Hiển thị đáp án đúng và lời giải
+      showExplanationBox(isCorrect, q.correctKey, q.explanation);
+
+      // Ẩn nút kiểm tra, hiện nút chuyển tiếp
+      const btnCheck = document.getElementById("btnCheckAnswer");
+      btnCheck.disabled = true;
+      btnCheck.style.display = "none";
+
+      const btnNext = document.getElementById("btnNextQuestion");
+      const btnViewResults = document.getElementById("btnViewResults");
+
+      if (index < QUIZ_QUESTIONS.length - 1) {
+        btnNext.style.display = "inline-flex";
+        btnViewResults.style.display = "none";
+      } else {
+        btnNext.style.display = "none";
+        btnViewResults.style.display = "inline-flex";
+      }
+    }
+
+    // Hiển thị hộp giải thích chi tiết
+    function showExplanationBox(isCorrect, correctKey, explanationText) {
+      const card = document.getElementById("explanationCard");
+      const status = document.getElementById("explanationStatus");
+      const text = document.getElementById("explanationText");
+
+      card.style.display = "block";
+      if (isCorrect) {
+        status.innerHTML = `<span style="color: var(--success); font-size: 1.15rem;">🎉 Chính xác! Đáp án đúng là <strong>${correctKey}</strong>.</span>`;
+      } else {
+        status.innerHTML = `<span style="color: var(--danger); font-size: 1.15rem;">❌ Chưa chính xác! Đáp án đúng là <strong>${correctKey}</strong>.</span>`;
+      }
+      text.innerHTML = `<strong>Lời giải chi tiết:</strong> ${explanationText}`;
+    }
+
+    /* ==========================================================================
+       G. KẾT QUẢ VÀ ÔN TẬP (RESULTS & WRONG QUESTIONS REVIEW)
+       ========================================================================== */
+    function showQuizResults() {
+      state.quizCompleted = true;
+      const total = QUIZ_QUESTIONS.length;
+      const score = state.score;
+
+      // Hiển thị phần kết quả
+      const resultsSection = document.getElementById("results");
+      resultsSection.style.display = "block";
+
+      // Cập nhật điểm số
+      document.getElementById("resultScore").textContent = score;
+      document.getElementById("resultTotal").textContent = `/ ${total} câu`;
+
+      // Đánh giá kết quả
+      const badge = document.getElementById("resultBadge");
+      const feedback = document.getElementById("resultFeedback");
+      const percent = (score / total) * 100;
+
+      if (percent === 100) {
+        badge.className = "badge badge-success result-badge";
+        badge.textContent = "🏆 Xuất sắc (100%)";
+        feedback.textContent = "Chúc mừng bạn! Bạn đã nắm vững toàn bộ kiến thức về cấu tạo tế bào nhân sơ, nhân thực, thực vật và động vật!";
+        document.getElementById("perfectScoreBanner").style.display = "block";
+      } else if (percent >= 75) {
+        badge.className = "badge badge-primary result-badge";
+        badge.textContent = "⭐ Giỏi (Đạt trên 75%)";
+        feedback.textContent = "Kết quả rất tốt! Bạn đã hiểu hầu hết các khái niệm cốt lõi. Hãy ôn lại vài câu chưa đúng bên dưới để đạt điểm tuyệt đối nhé!";
+        document.getElementById("perfectScoreBanner").style.display = "none";
+      } else if (percent >= 50) {
+        badge.className = "badge badge-warning result-badge";
+        badge.textContent = "📖 Khá (Cần củng cố)";
+        feedback.textContent = "Bạn đã có nền tảng cơ bản, nhưng cần ôn tập kỹ lại các bào quan đặc thù để tránh nhầm lẫn trong bài thi.";
+        document.getElementById("perfectScoreBanner").style.display = "none";
+      } else {
+        badge.className = "badge result-badge";
+        badge.style.backgroundColor = "var(--danger-bg)";
+        badge.style.color = "var(--danger)";
+        badge.textContent = "⚠️ Cần xem lại lý thuyết";
+        feedback.textContent = "Đừng nản lòng! Hãy đọc lại phần bài học ở trên và làm lại bài luyện tập để nắm chắc kiến thức.";
+        document.getElementById("perfectScoreBanner").style.display = "none";
+      }
+
+      // Xây dựng danh sách câu làm sai
+      const wrongListContainer = document.getElementById("wrongItemsList");
+      const wrongContainer = document.getElementById("wrongAnswersContainer");
+      wrongListContainer.innerHTML = "";
+
+      const wrongQuestions = [];
+      for (let i = 0; i < total; i++) {
+        const ans = state.userAnswers[i];
+        if (ans && !ans.isCorrect) {
+          wrongQuestions.push(ans);
+        } else if (!ans) {
+          // Trường hợp chưa làm câu này nhưng đã bấm xem kết quả
+          wrongQuestions.push({
+            questionId: QUIZ_QUESTIONS[i].id,
+            topicId: QUIZ_QUESTIONS[i].topicId,
+            topicName: QUIZ_QUESTIONS[i].topicName,
+            questionText: QUIZ_QUESTIONS[i].question,
+            selectedKey: "Chưa chọn",
+            correctKey: QUIZ_QUESTIONS[i].correctKey,
+            isCorrect: false,
+            explanation: QUIZ_QUESTIONS[i].explanation
+          });
+        }
+      }
+
+      document.getElementById("wrongCount").textContent = wrongQuestions.length;
+
+      if (wrongQuestions.length === 0) {
+        wrongContainer.style.display = "none";
+      } else {
+        wrongContainer.style.display = "block";
+        wrongQuestions.forEach(item => {
+          const card = document.createElement("div");
+          card.className = "wrong-item-card";
+          card.innerHTML = `
+            <div class="wrong-item-question">${item.questionText}</div>
+            <div class="wrong-item-choices">
+              <div>Bạn đã chọn: <span class="user-choice">${item.selectedKey}</span></div>
+              <div>Đáp án chính xác: <span class="correct-choice">${item.correctKey}</span></div>
+            </div>
+            <div class="wrong-item-explain">
+              <strong>💡 Lời giải thích:</strong> ${item.explanation}
+            </div>
+            <button class="btn-review-topic" onclick="openReviewLesson('${item.topicId}')">
+              📖 Ôn lại bài học: ${item.topicName}
+            </button>
+          `;
+          wrongListContainer.appendChild(card);
+        });
+      }
+
+      // Cuộn mượt đến phần kết quả
+      resultsSection.scrollIntoView({ behavior: "smooth" });
+    }
+
+    // YÊU CẦU: Nút mở bài học liên quan từ câu làm sai
+    window.openReviewLesson = function(topicId) {
+      switchLessonTopic(topicId);
+      const lessonSection = document.getElementById("lessons");
+      lessonSection.scrollIntoView({ behavior: "smooth" });
+    };
+
+    // YÊU CẦU: Nút Làm lại để đặt lại toàn bộ bài luyện tập
+    function restartQuiz() {
+      // Đặt lại toàn bộ trạng thái
+      state.currentQuestionIndex = 0;
+      state.selectedKey = null;
+      state.userAnswers = {};
+      state.score = 0;
+      state.quizCompleted = false;
+
+      // Ẩn phần kết quả
+      document.getElementById("results").style.display = "none";
+
+      // Render lại câu hỏi 1
+      renderQuestion(0);
+
+      // Cuộn mượt về khung làm bài quiz
+      const quizSection = document.getElementById("quiz");
+      quizSection.scrollIntoView({ behavior: "smooth" });
+    }
+  </script>
+</body>
+</html>
