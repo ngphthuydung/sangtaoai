@@ -1,0 +1,140 @@
+import React, { useState, useEffect } from 'react';
+
+interface BackendHealth {
+  status: string;
+  service: string;
+  version: string;
+  environment: string;
+  timestamp: string;
+}
+
+export const App: React.FC = () => {
+  const [healthData, setHealthData] = useState<BackendHealth | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+
+  const checkBackendHealth = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/health`);
+      if (!response.ok) {
+        throw new Error(`Máy chủ phản hồi với mã lỗi HTTP: ${response.status}`);
+      }
+      const data: BackendHealth = await response.json();
+      setHealthData(data);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Không thể kết nối đến Backend';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    checkBackendHealth();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-slate-100 py-10 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto space-y-6">
+        {/* Header Header Thân Thiện Người Dùng */}
+        <header className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-200 text-center">
+          <div className="inline-flex items-center justify-center p-3 bg-brand-50 rounded-2xl mb-4">
+            <span className="text-4xl" role="img" aria-label="shield">🛡️</span>
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">
+            Lá Chắn Người Thân
+          </h1>
+          <p className="mt-2 text-lg sm:text-xl text-slate-600 font-medium">
+            Nền tảng AI Đa tầng Bảo vệ Người thân khỏi Lừa đảo Trực tuyến
+          </p>
+          <div className="mt-4 inline-flex items-center px-3.5 py-1.5 rounded-full text-sm font-semibold bg-emerald-100 text-emerald-800">
+            ✓ Milestone 1: Khởi Tạo Khung Dự Án (Scaffolding Thành Công)
+          </div>
+        </header>
+
+        {/* Khung Kiểm Tra Kết Nối Backend */}
+        <main className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-slate-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                Kiểm tra Kết nối Hệ thống (System Health)
+              </h2>
+              <p className="text-slate-600 mt-1">
+                Endpoint kiểm thử: <code className="bg-slate-100 px-2 py-1 rounded text-brand-600 font-mono text-sm">{apiBaseUrl}/api/v1/health</code>
+              </p>
+            </div>
+            <button
+              onClick={checkBackendHealth}
+              disabled={loading}
+              className="inline-flex items-center justify-center px-5 py-3 border border-transparent text-base font-semibold rounded-xl text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 disabled:opacity-50 transition shadow-sm cursor-pointer"
+            >
+              {loading ? 'Đang kiểm tra...' : '🔄 Kiểm tra lại'}
+            </button>
+          </div>
+
+          <div className="mt-6">
+            {loading && (
+              <div className="p-6 text-center text-slate-500 font-medium">
+                Đang kết nối tới máy chủ Backend...
+              </div>
+            )}
+
+            {error && (
+              <div className="p-5 rounded-xl bg-danger-50 border border-red-200 text-red-700">
+                <div className="flex items-center gap-2 font-bold text-lg">
+                  <span>⚠️</span> Chưa kết nối được với Backend
+                </div>
+                <p className="mt-1 text-sm">{error}</p>
+                <div className="mt-3 text-xs bg-white/70 p-3 rounded-lg border border-red-100 font-mono">
+                  Gợi ý: Hãy đảm bảo máy chủ FastAPI đang chạy tại lệnh: <br />
+                  <code>cd backend &amp;&amp; .venv\Scripts\uvicorn app.main:app --reload --port 8000</code>
+                </div>
+              </div>
+            )}
+
+            {healthData && !loading && (
+              <div className="p-5 rounded-xl bg-safe-50 border border-green-200 text-green-900">
+                <div className="flex items-center gap-2 font-bold text-lg text-safe-600">
+                  <span>✅</span> Kết nối Backend thành công!
+                </div>
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div className="bg-white p-3 rounded-lg border border-green-100">
+                    <span className="text-slate-500 block text-xs">Trạng thái:</span>
+                    <span className="font-semibold text-emerald-600 uppercase">{healthData.status}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border border-green-100">
+                    <span className="text-slate-500 block text-xs">Tên dịch vụ:</span>
+                    <span className="font-semibold text-slate-800">{healthData.service}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border border-green-100">
+                    <span className="text-slate-500 block text-xs">Phiên bản:</span>
+                    <span className="font-semibold text-slate-800">{healthData.version}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border border-green-100">
+                    <span className="text-slate-500 block text-xs">Môi trường:</span>
+                    <span className="font-semibold text-slate-800 capitalize">{healthData.environment}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded-lg border border-green-100 sm:col-span-2">
+                    <span className="text-slate-500 block text-xs">Thời gian phản hồi máy chủ:</span>
+                    <span className="font-mono text-slate-700">{healthData.timestamp}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* Thông tin chuẩn bị cho các Milestone tiếp theo */}
+        <footer className="text-center text-sm text-slate-500 pt-2">
+          Dự án độc lập 100% • Thiết kế sẵn sàng mở rộng Android APK với Capacitor • An toàn bảo mật thông tin
+        </footer>
+      </div>
+    </div>
+  );
+};
+
+export default App;
