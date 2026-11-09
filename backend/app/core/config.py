@@ -2,7 +2,7 @@
 Core configuration module for Lá Chắn Người Thân Backend.
 """
 from typing import List, Union
-from pydantic import field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
 
@@ -19,10 +19,22 @@ class Settings(BaseSettings):
     PORT: int = 8000
     HOST: str = "127.0.0.1"
 
-    # CORS Origins: Danh sách các nguồn gốc (Frontend) được phép giao tiếp với API
-    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    AI_ENABLED: bool = False
+    OPENAI_API_KEY: str | None = None
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    AI_TIMEOUT_SECONDS: float = Field(default=20.0, gt=0, le=60)
+    AI_MAX_INPUT_CHARS: int = Field(default=12000, gt=0, le=30000)
+    AI_MAX_CONCURRENT_REQUESTS: int = Field(default=2, gt=0, le=20)
+    AI_MAX_OUTPUT_TOKENS: int = Field(default=1200, gt=0, le=4000)
 
-    SECRET_KEY: str = "dev_secret_key_la_chan_nguoi_than_local_development_only"
+    # CORS Origins: Danh sách các nguồn gốc (Frontend) được phép giao tiếp với API
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://127.0.0.1:5173", "https://musical-sniffle-96xjvj59xgrvfp564-5173.app.github.dev"]
+
+    SECRET_KEY: SecretStr = Field(min_length=32, repr=False)
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -46,4 +58,25 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings()
+def load_settings() -> Settings:
+    try:
+        return Settings()
+    except ValidationError as error:
+        invalid_fields = {
+            str(issue["loc"][0])
+            for issue in error.errors()
+            if issue.get("loc")
+        }
+        if "SECRET_KEY" in invalid_fields:
+            raise RuntimeError(
+                "Configuration error: SECRET_KEY must be set in the environment "
+                "or backend .env file and contain at least 32 characters."
+            ) from None
+
+        fields = ", ".join(sorted(invalid_fields)) or "unknown settings"
+        raise RuntimeError(
+            f"Configuration error: invalid settings for {fields}."
+        ) from None
+
+
+settings = load_settings()

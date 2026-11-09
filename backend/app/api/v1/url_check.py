@@ -42,7 +42,20 @@ async def check_url(request: URLCheckRequest):
 
     if parsed.port and parsed.port not in (80, 443):
         suspicious_signals.append("Sử dụng cổng không phổ biến")
+    suspicious_keywords = [
+        "dang-nhap-ngan-hang",
+        "xac-minh-tai-khoan",
+        "nhan-thuong",
+        "trung-thuong",
+        "cap-nhat-otp",
+    ]
 
+    hostname = (parsed.hostname or "").lower()
+
+    if any(word in hostname for word in suspicious_keywords):
+        suspicious_signals.append(
+            "Tên miền chứa cụm từ thường gặp trong các trang giả mạo"
+        )
     if suspicious_signals:
         return URLCheckResponse(
             url=url,
