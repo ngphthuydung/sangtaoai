@@ -77,6 +77,7 @@ class MockImageGeminiProvider:
             risk_level=RiskLevel.HIGH_RISK,
             summary="Ảnh yêu cầu cung cấp mã OTP.",
             visible_text="Gửi mã OTP cho tôi",
+            visible_text_status="COMPLETED",
             detected_behaviors=[
                 {
                     "type": "CREDENTIAL_OTP_THEFT",
@@ -102,6 +103,7 @@ class MockAudioGeminiProvider:
             risk_level=RiskLevel.HIGH_RISK,
             summary="Người gọi yêu cầu mã OTP.",
             transcript="Gửi mã OTP cho tôi, số điện thoại 0912345678.",
+            transcription_status="COMPLETED",
             detected_behaviors=[
                 {
                     "type": "CREDENTIAL_OTP_THEFT",

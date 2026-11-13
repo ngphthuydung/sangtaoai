@@ -31,6 +31,12 @@ class TranscriptionStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class ImageTextStatus(str, Enum):
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
 class BehaviorType(str, Enum):
     URGENCY_PRESSURE = "URGENCY_PRESSURE"
     AUTHORITY_IMPERSONATION = "AUTHORITY_IMPERSONATION"
@@ -133,6 +139,7 @@ class ModelAnalysisOutput(BaseModel):
 
 class ImageModelAnalysisOutput(ModelAnalysisOutput):
     visible_text: str = Field(max_length=12000)
+    visible_text_status: ImageTextStatus | None = None
 
 
 class AudioModelAnalysisOutput(ModelAnalysisOutput):

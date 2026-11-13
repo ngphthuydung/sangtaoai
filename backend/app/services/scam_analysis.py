@@ -18,6 +18,7 @@ from app.schemas.scam_analysis import (
     CrossCheckStatus,
     DetectedBehavior,
     ImageModelAnalysisOutput,
+    ImageTextStatus,
     ModelAnalysisOutput,
     RiskLevel,
     ScamAnalysisRequest,
@@ -273,15 +274,54 @@ class ScamAnalysisService:
             provider.name,
             output.visible_text,
         )
+        text_status = output.visible_text_status or (
+            ImageTextStatus.PARTIAL
+            if output.visible_text.strip()
+            else ImageTextStatus.FAILED
+        )
+        if text_status == ImageTextStatus.FAILED or not output.visible_text.strip():
+            return self._response(
+                RiskLevel.INSUFFICIENT_DATA,
+                "Chưa đọc rõ chữ trong ảnh để đánh giá. Đây không phải kết luận an toàn.",
+                [],
+                [
+                    "Hãy gửi ảnh rõ hơn, không bị mờ hoặc che khuất.",
+                    "Chưa làm theo yêu cầu chuyển tiền hay cung cấp thông tin bí mật.",
+                ],
+                [],
+                CrossCheckStatus.NOT_REQUESTED,
+                "Không đọc được nội dung cần thiết trong ảnh.",
+                AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
+            ).model_copy(
+                update={
+                    "limitations": [
+                        "Không đọc được chữ cần thiết trong ảnh.",
+                        "Danh tính người gửi và thông tin bên ngoài chưa được xác minh.",
+                    ]
+                }
+            )
         invalid = self._has_unusable_high_risk_evidence(output, assessment)
-        return self._primary_result(
+        result = self._primary_result(
             output,
             assessment,
             invalid,
             CrossCheckStatus.NOT_REQUESTED,
             "Ảnh được phân tích bằng Gemini Vision.",
             AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
+            evidence_complete=text_status == ImageTextStatus.COMPLETED,
         )
+        if text_status == ImageTextStatus.PARTIAL:
+            result = result.model_copy(
+                update={
+                    "summary": result.summary
+                    + " Chỉ đọc được một phần chữ trong ảnh.",
+                    "limitations": [
+                        *result.limitations,
+                        "Một phần chữ trong ảnh chưa đọc được và chưa được đánh giá.",
+                    ][:10],
+                }
+            )
+        return result
 
     async def analyze_audio(
         self, audio: bytes, mime_type: str
@@ -324,7 +364,7 @@ class ScamAnalysisService:
             output.transcript,
         )
         transcription_status = output.transcription_status or (
-            TranscriptionStatus.COMPLETED
+            TranscriptionStatus.PARTIAL
             if output.transcript.strip()
             else TranscriptionStatus.FAILED
         )
@@ -367,6 +407,7 @@ class ScamAnalysisService:
             CrossCheckStatus.NOT_REQUESTED,
             "Âm thanh được phiên âm và phân tích bằng Gemini.",
             AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
+            evidence_complete=transcription_status == TranscriptionStatus.COMPLETED,
         )
         if transcription_status == TranscriptionStatus.PARTIAL:
             result = result.model_copy(
@@ -412,6 +453,7 @@ class ScamAnalysisService:
         cross_check_status: CrossCheckStatus,
         cross_check_summary: str,
         analysis_method: AnalysisMethod,
+        evidence_complete: bool = True,
     ) -> ScamAnalysisResponse:
         finding_types = {finding.type for finding in assessment.findings}
         high_risk_combination = (
@@ -422,11 +464,36 @@ class ScamAnalysisService:
                 & {"THREATENED_CONSEQUENCES", "URGENCY_PRESSURE"}
             )
         )
-        if "CREDENTIAL_OTP_THEFT" in finding_types or high_risk_combination:
+        high_risk_supported = (
+            output.risk_level == RiskLevel.HIGH_RISK
+            and (
+                "CREDENTIAL_OTP_THEFT" in finding_types
+                or high_risk_combination
+            )
+        )
+        if high_risk_supported and evidence_complete:
             risk = RiskLevel.HIGH_RISK
-        elif assessment.findings:
+        elif (
+            assessment.findings
+            and output.risk_level
+            in {RiskLevel.HIGH_RISK, RiskLevel.SUSPICIOUS}
+        ):
             risk = RiskLevel.SUSPICIOUS
-        elif output.risk_level == RiskLevel.LOW_RISK and not invalid:
+        elif (
+            assessment.findings
+            and output.risk_level == RiskLevel.LOW_RISK
+            and (
+                "CREDENTIAL_OTP_THEFT" in finding_types
+                or high_risk_combination
+            )
+        ):
+            risk = RiskLevel.SUSPICIOUS
+        elif (
+            output.risk_level == RiskLevel.LOW_RISK
+            and not assessment.findings
+            and not invalid
+            and evidence_complete
+        ):
             risk = RiskLevel.LOW_RISK
         else:
             risk = RiskLevel.INSUFFICIENT_DATA
@@ -460,18 +527,61 @@ class ScamAnalysisService:
                 "Chưa đủ bằng chứng cụ thể trong nội dung đã gửi để kết luận. "
                 "Một số trích dẫn do AI đưa ra không khớp nguyên văn."
             )
+        elif assessment.findings:
+            finding = assessment.findings[0]
+            summary = (
+                "Có đoạn trích cần lưu ý, nhưng chưa đủ thông tin để xác định mức độ: "
+                f"“{finding.evidence}”"
+            )
         else:
             summary = "Chưa đủ bằng chứng cụ thể trong nội dung đã gửi để kết luận."
         return self._response(
             risk,
             summary,
             assessment.findings,
-            output.recommendations,
-            output.unverified_information,
+            self._recommended_actions(risk, finding_types),
+            ["Danh tính người gửi và thông tin bên ngoài chưa được xác minh."],
             cross_check_status,
             cross_check_summary,
             analysis_method,
         )
+
+    @staticmethod
+    def _recommended_actions(
+        risk: RiskLevel,
+        finding_types: set[str],
+    ) -> list[str]:
+        if risk == RiskLevel.HIGH_RISK:
+            if "CREDENTIAL_OTP_THEFT" in finding_types:
+                return [
+                    "Không cung cấp OTP hoặc mật khẩu. Nếu đã gửi, hãy liên hệ tổ chức liên quan qua kênh chính thức."
+                ]
+            return [
+                "Không chuyển tiền theo yêu cầu này. Tự liên hệ cơ quan qua số điện thoại chính thức."
+            ]
+        if risk == RiskLevel.SUSPICIOUS:
+            actions: list[str] = []
+            if "CREDENTIAL_OTP_THEFT" in finding_types:
+                actions.append("Không chia sẻ OTP hoặc mật khẩu; tự liên hệ tổ chức qua kênh chính thức.")
+            if "UNUSUAL_PAYMENT_REQUEST" in finding_types:
+                actions.append("Tạm dừng thanh toán; xác minh qua ứng dụng hoặc số điện thoại chính thức.")
+            if "SUSPICIOUS_WEBSITE_REDIRECTION" in finding_types:
+                actions.append("Không mở liên kết hoặc nhập thông tin; tự vào ứng dụng chính thức.")
+            if "REWARD_BAIT" in finding_types:
+                actions.append("Không chuyển tiền hoặc nộp phí để nhận lợi ích trước khi xác minh.")
+            if "AUTHORITY_IMPERSONATION" in finding_types:
+                actions.append("Tự gọi số chính thức của cơ quan để xác minh.")
+            if "UNTRUSTED_SOFTWARE_INSTALLATION" in finding_types:
+                actions.append("Không cài ứng dụng theo yêu cầu khi chưa xác minh nguồn.")
+            return (actions or ["Tạm dừng làm theo yêu cầu và xác minh người gửi qua kênh độc lập."])[:2]
+        if risk == RiskLevel.LOW_RISK:
+            return [
+                "Chưa thấy dấu hiệu rõ ràng. Nếu được yêu cầu chuyển tiền hoặc cung cấp thông tin bí mật, hãy tự xác minh qua kênh chính thức."
+            ]
+        return [
+            "Hãy bổ sung nội dung liên quan hoặc gửi ảnh, âm thanh rõ hơn để kiểm tra.",
+            "Tạm hoãn chuyển tiền hoặc chia sẻ thông tin bí mật cho đến khi xác minh.",
+        ]
 
     @staticmethod
     def _response(

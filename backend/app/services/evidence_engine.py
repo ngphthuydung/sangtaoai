@@ -80,7 +80,10 @@ class EvidenceEngine:
                 continue
             name_vi, description = BEHAVIOR_CATALOG.get(
                 finding.type,
-                (finding.name_vi, finding.description),
+                (
+                    "Dấu hiệu cần kiểm tra",
+                    "Đoạn trích này cần được xem xét trong ngữ cảnh.",
+                ),
             )
             findings.append(
                 DetectedBehavior(

@@ -171,6 +171,7 @@ def test_transient_provider_failure_retries_once_without_changing_input(mode):
                 risk_level=RiskLevel.SUSPICIOUS,
                 summary="Ảnh có dấu hiệu cần kiểm tra.",
                 visible_text="Gửi mã OTP",
+                visible_text_status="COMPLETED",
                 detected_behaviors=[],
                 recommendations=["Không chia sẻ mã xác thực."],
             )
@@ -183,6 +184,7 @@ def test_transient_provider_failure_retries_once_without_changing_input(mode):
                 risk_level=RiskLevel.SUSPICIOUS,
                 summary="Âm thanh có dấu hiệu cần kiểm tra.",
                 transcript="Gửi mã OTP",
+                transcription_status="COMPLETED",
                 detected_behaviors=[],
                 recommendations=["Không chia sẻ mã xác thực."],
             )
@@ -505,7 +507,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Ngân hàng ABC: Tài khoản bị khóa. Gửi mã OTP để xác minh.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.HIGH_RISK,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -523,7 +525,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Đơn hàng đang chờ. Chuyển khoản phí giao hàng 25.000 đồng vào tài khoản này.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.SUSPICIOUS,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -561,7 +563,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Công an yêu cầu chuyển tiền ngay, nếu không sẽ phong tỏa tài khoản.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.HIGH_RISK,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -593,7 +595,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Cơ hội đầu tư lợi nhuận cao, cam kết sinh lời mỗi ngày.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.SUSPICIOUS,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -611,7 +613,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Chúc mừng bạn trúng thưởng. Nộp phí nhận quà trước hôm nay.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.SUSPICIOUS,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -629,7 +631,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
         (
             "Tuyển cộng tác viên làm tại nhà. Nộp phí hồ sơ trước khi nhận việc.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.SUSPICIOUS,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -648,7 +650,7 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
             "Tin nhắn 1 - Người gửi: Tôi là công an.\n"
             "Tin nhắn 2 - Người gửi: Chuyển tiền để xác minh ngay.",
             ModelAnalysisOutput(
-                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                risk_level=RiskLevel.SUSPICIOUS,
                 summary="Chưa đủ căn cứ.",
                 detected_behaviors=[
                     {
@@ -709,6 +711,220 @@ def test_model_citation_with_wrapped_lines_preserves_original_excerpt():
     assert assessment.findings[0].evidence == "Gửi mã OTP\nđể xác minh."
 
 
+def test_unknown_model_behavior_does_not_expose_raw_label_or_description():
+    output = model_output(
+        behavior_type="FUTURE_TACTIC",
+        evidence="Gửi mã OTP cho tôi",
+    )
+    assessment = ScamAnalysisService().evidence_engine.assess(
+        output,
+        "gemini",
+        "Gửi mã OTP cho tôi",
+    )
+
+    assert assessment.findings[0].name_vi == "Dấu hiệu cần kiểm tra"
+    assert assessment.findings[0].description == (
+        "Đoạn trích này cần được xem xét trong ngữ cảnh."
+    )
+    assert assessment.findings[0].explanation.startswith("Dấu hiệu này dựa trên đoạn trích")
+
+
+def test_verified_finding_does_not_upgrade_model_insufficient_risk():
+    provider = FakeProvider(
+        "gemini",
+        model_output(
+            risk=RiskLevel.INSUFFICIENT_DATA,
+            behavior_type="UNUSUAL_PAYMENT_REQUEST",
+            evidence="Chuyển khoản phí giao hàng",
+        ),
+    )
+
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=provider,
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(
+                content="Yêu cầu: Chuyển khoản phí giao hàng",
+                allow_external_processing=True,
+            )
+        )
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.detected_behaviors[0].evidence == "Chuyển khoản phí giao hàng"
+    assert "chưa đủ thông tin" in result.summary
+
+
+def test_legitimate_otp_warning_is_not_escalated_by_a_low_risk_result():
+    provider = FakeProvider(
+        "gemini",
+        ModelAnalysisOutput(
+            risk_level=RiskLevel.LOW_RISK,
+            summary="Cảnh báo bảo mật.",
+            detected_behaviors=[],
+            recommendations=["Không chia sẻ mã OTP."],
+        ),
+    )
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=provider,
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(
+                content="Ngân hàng nhắc: Không chia sẻ mã OTP cho bất kỳ ai.",
+                allow_external_processing=True,
+            )
+        )
+    )
+
+    assert result.risk_level == RiskLevel.LOW_RISK
+    assert result.detected_behaviors == []
+    assert "Không chia sẻ mã OTP" not in result.summary
+
+
+@pytest.mark.parametrize(
+    ("case_id", "content", "findings", "expected_risk"),
+    [
+        (
+            "explicit-otp-request-mislabeled-low",
+            "Ngân hàng ABC yêu cầu gửi mã OTP để mở khóa tài khoản.",
+            [
+                ("CREDENTIAL_OTP_THEFT", "gửi mã OTP để mở khóa tài khoản"),
+            ],
+            RiskLevel.SUSPICIOUS,
+        ),
+        (
+            "authority-transfer-threat-mislabeled-low",
+            "Tôi là công an. Chuyển tiền để xác minh ngay, nếu không sẽ phong tỏa tài khoản.",
+            [
+                ("AUTHORITY_IMPERSONATION", "Tôi là công an"),
+                ("UNUSUAL_PAYMENT_REQUEST", "Chuyển tiền để xác minh ngay"),
+                ("THREATENED_CONSEQUENCES", "nếu không sẽ phong tỏa tài khoản"),
+            ],
+            RiskLevel.SUSPICIOUS,
+        ),
+    ],
+    ids=[
+        "explicit-otp-request-mislabeled-low",
+        "authority-transfer-threat-mislabeled-low",
+    ],
+)
+def test_clear_verified_scam_signals_cannot_remain_low_risk(
+    case_id, content, findings, expected_risk
+):
+    del case_id
+    output = ModelAnalysisOutput(
+        risk_level=RiskLevel.LOW_RISK,
+        summary="Không thấy dấu hiệu.",
+        detected_behaviors=[
+            {
+                "type": behavior_type,
+                "name_vi": "Mô tả do mô hình trả về",
+                "description": "Mô tả chi tiết do mô hình trả về.",
+                "evidence": evidence,
+                "explanation": "Hành vi cần kiểm tra.",
+            }
+            for behavior_type, evidence in findings
+        ],
+        recommendations=["Xác minh nội dung."],
+    )
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=FakeProvider("gemini", output),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(content=content, allow_external_processing=True)
+        )
+    )
+
+    assert result.risk_level == expected_risk
+    assert result.risk_level != RiskLevel.HIGH_RISK
+    assert all(finding.evidence in content for finding in result.detected_behaviors)
+
+
+def test_image_without_readable_text_is_not_reported_as_low_risk():
+    class UnreadableImageProvider:
+        name = "gemini"
+
+        async def analyze_image(self, image: bytes, mime_type: str) -> ImageModelAnalysisOutput:
+            return ImageModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Không thấy dấu hiệu.",
+                visible_text="",
+                detected_behaviors=[],
+                recommendations=["Không cần làm gì."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            image_provider=UnreadableImageProvider(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_image(b"image", "image/jpeg")
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert "đọc rõ chữ" in result.summary.lower()
+    assert result.detected_behaviors == []
+
+
+def test_missing_image_readability_status_is_treated_as_partial():
+    class ImageProviderWithoutReadabilityStatus:
+        name = "gemini"
+
+        async def analyze_image(self, image: bytes, mime_type: str) -> ImageModelAnalysisOutput:
+            return ImageModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Không thấy dấu hiệu.",
+                visible_text="Thông báo mẫu",
+                detected_behaviors=[],
+                recommendations=["Không cần làm gì."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            image_provider=ImageProviderWithoutReadabilityStatus(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_image(b"image", "image/jpeg")
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert "Chỉ đọc được một phần chữ" in result.summary
+
+
+def test_partial_image_text_cannot_produce_high_risk_conclusion():
+    class PartiallyReadableImageProvider:
+        name = "gemini"
+
+        async def analyze_image(self, image: bytes, mime_type: str) -> ImageModelAnalysisOutput:
+            return ImageModelAnalysisOutput(
+                risk_level=RiskLevel.HIGH_RISK,
+                summary="Nguy cơ cao.",
+                visible_text="Gửi mã OTP",
+                visible_text_status="PARTIAL",
+                detected_behaviors=[
+                    {
+                        "type": "CREDENTIAL_OTP_THEFT",
+                        "name_vi": "Xin OTP",
+                        "description": "Yêu cầu mã.",
+                        "evidence": "Gửi mã OTP",
+                        "explanation": "Yêu cầu mã.",
+                    }
+                ],
+                recommendations=["Không cung cấp OTP."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            image_provider=PartiallyReadableImageProvider(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_image(b"image", "image/jpeg")
+    )
+
+    assert result.risk_level == RiskLevel.SUSPICIOUS
+    assert "Chỉ đọc được một phần chữ" in result.summary
+
+
 def test_audio_transcription_failure_is_not_reported_as_scam_evidence():
     class UnclearAudioProvider:
         name = "gemini"
@@ -765,6 +981,33 @@ def test_partial_audio_without_verified_evidence_remains_unresolved():
     result = run(
         ScamAnalysisService(
             audio_provider=PartialAudioProvider(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_audio(b"audio", "audio/mpeg")
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.transcription_status == TranscriptionStatus.PARTIAL
+    assert "đánh giá toàn bộ nội dung" in result.summary
+
+
+def test_missing_audio_transcription_status_is_treated_as_partial():
+    class AudioProviderWithoutTranscriptionStatus:
+        name = "gemini"
+
+        async def analyze_audio(
+            self, audio: bytes, mime_type: str
+        ) -> AudioModelAnalysisOutput:
+            return AudioModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Không thấy dấu hiệu.",
+                transcript="Nghe được một vài từ.",
+                detected_behaviors=[],
+                recommendations=["Không cần làm gì."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            audio_provider=AudioProviderWithoutTranscriptionStatus(),
             configuration=configured_settings(OPENAI_API_KEY=None),
         ).analyze_audio(b"audio", "audio/mpeg")
     )
