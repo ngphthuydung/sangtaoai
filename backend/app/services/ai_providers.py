@@ -2,6 +2,8 @@
 
 import base64
 import json
+import logging
+from pydantic import ValidationError
 from typing import Protocol
 from urllib.parse import quote, urlparse
 
@@ -278,4 +280,17 @@ class GeminiProvider(BaseHTTPProvider):
         response_content = payload["candidates"][0]["content"]["parts"][0]["text"]
         if not isinstance(response_content, str):
             raise ValueError("Gemini trả về nội dung âm thanh không hợp lệ")
-        return AudioModelAnalysisOutput.model_validate_json(response_content)
+        
+
+        try:
+            return AudioModelAnalysisOutput.model_validate_json(response_content)
+        except ValidationError as error:
+            logger = logging.getLogger(__name__)
+            for issue in error.errors(include_input=False):
+                logger.error(
+                    "Gemini audio schema validation: field=%s, type=%s",
+                    ".".join(str(part) for part in issue["loc"]),
+                    issue["type"],
+                )
+            raise
+
