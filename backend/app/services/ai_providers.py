@@ -16,6 +16,8 @@ from app.schemas.scam_analysis import (
     ModelAnalysisOutput,
 )
 
+AUDIO_MAX_OUTPUT_TOKENS = 4000
+
 
 class AIAnalysisProvider(Protocol):
     name: str
@@ -259,37 +261,68 @@ class GeminiProvider(BaseHTTPProvider):
             "Chỉ xuất JSON theo schema, không thêm trường: "
             f"{json.dumps(AudioModelAnalysisOutput.model_json_schema(), ensure_ascii=False)}"
         )
-        payload = await self._post_json(
-            f"{self.configuration.GEMINI_BASE_URL.rstrip('/')}/models/{model}:generateContent",
-            {"x-goog-api-key": str(self.configuration.GEMINI_API_KEY)},
-            {
-                "systemInstruction": {"parts": [{"text": audio_instruction}]},
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": "Chép lời nói tiếng Việt và phân tích dấu hiệu đáng ngờ trong bản ghi âm."
-                            },
-                            {
-                                "inlineData": {
-                                    "mimeType": mime_type,
-                                    "data": base64.b64encode(audio).decode("ascii"),
-                                }
-                            },
-                        ],
-                    }
-                ],
-                "generationConfig": {
-                    "maxOutputTokens": self.configuration.AI_MAX_OUTPUT_TOKENS,
-                    "responseMimeType": "application/json",
-                },
-            },
+        request_url = (
+            f"{self.configuration.GEMINI_BASE_URL.rstrip('/')}/models/{model}:generateContent"
         )
-        response_content = payload["candidates"][0]["content"]["parts"][0]["text"]
+        headers = {"x-goog-api-key": str(self.configuration.GEMINI_API_KEY)}
+        body = {
+            "systemInstruction": {"parts": [{"text": audio_instruction}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": "Chép lời nói tiếng Việt và phân tích dấu hiệu đáng ngờ trong bản ghi âm."
+                        },
+                        {
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": base64.b64encode(audio).decode("ascii"),
+                            }
+                        },
+                    ],
+                }
+            ],
+            "generationConfig": {
+                "maxOutputTokens": AUDIO_MAX_OUTPUT_TOKENS,
+                "responseMimeType": "application/json",
+            },
+        }
+        try:
+            payload = await self._post_json(request_url, headers, body)
+        except AIProviderError as error:
+            if error.status_code != 503:
+                raise
+            payload = await self._post_json(request_url, headers, body)
+
+        candidate = payload["candidates"][0]
+        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        if (
+            not isinstance(finish_reason, str)
+            or len(finish_reason) > 40
+            or not finish_reason.isascii()
+            or not finish_reason.replace("_", "").isalnum()
+        ):
+            finish_reason = "UNKNOWN"
+        usage_metadata = payload.get("usageMetadata")
+        output_tokens = (
+            usage_metadata.get("candidatesTokenCount")
+            if isinstance(usage_metadata, dict)
+            else None
+        )
+        if not isinstance(output_tokens, int) or output_tokens < 0:
+            output_tokens = "UNKNOWN"
+        logging.getLogger(__name__).info(
+            "Gemini audio finish_reason=%s, output_tokens=%s",
+            finish_reason,
+            output_tokens,
+        )
+        if finish_reason == "MAX_TOKENS":
+            raise AIProviderError("Gemini audio response reached the token limit")
+
+        response_content = candidate["content"]["parts"][0]["text"]
         if not isinstance(response_content, str):
             raise ValueError("Gemini trả về nội dung âm thanh không hợp lệ")
-        
 
         try:
             return AudioModelAnalysisOutput.model_validate_json(response_content)

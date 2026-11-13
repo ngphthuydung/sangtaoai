@@ -6,6 +6,7 @@ import json
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.schemas.scam_analysis import (
@@ -485,7 +486,8 @@ def test_blank_content_is_rejected():
         ScamAnalysisRequest(content="   ")
 
 
-def test_gemini_provider_sends_audio_inline_and_transcribes_with_mock_http():
+def test_gemini_provider_sends_audio_inline_and_transcribes_with_mock_http(caplog):
+    caplog.set_level("INFO")
     requests: list[httpx.Request] = []
     audio_output = AudioModelAnalysisOutput(
         risk_level=RiskLevel.SUSPICIOUS,
@@ -502,11 +504,13 @@ def test_gemini_provider_sends_audio_inline_and_transcribes_with_mock_http():
             json={
                 "candidates": [
                     {
+                        "finishReason": "STOP",
                         "content": {
                             "parts": [{"text": audio_output.model_dump_json()}]
-                        }
+                        },
                     }
-                ]
+                ],
+                "usageMetadata": {"candidatesTokenCount": 42},
             },
         )
 
@@ -522,5 +526,149 @@ def test_gemini_provider_sends_audio_inline_and_transcribes_with_mock_http():
     assert requests[0].headers["x-goog-api-key"] == "gemini-test-secret"
     assert inline_audio["mimeType"] == "audio/mpeg"
     assert inline_audio["data"] == base64.b64encode(audio).decode("ascii")
+    assert body["generationConfig"]["maxOutputTokens"] == 4000
     assert "transcript" in body["systemInstruction"]["parts"][0]["text"]
     assert result.transcript == "Vui lòng cung cấp mã OTP."
+    assert "finish_reason=STOP, output_tokens=42" in caplog.text
+    assert "Vui lòng cung cấp mã OTP." not in caplog.text
+    assert "gemini-test-secret" not in caplog.text
+
+
+def test_gemini_audio_truncated_json_is_rejected_without_logging_response(caplog):
+    requests: list[httpx.Request] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [
+                                {"text": '{"transcript":"private-transcript-marker'}
+                            ]
+                        },
+                    }
+                ],
+                "usageMetadata": {"candidatesTokenCount": 40},
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(), transport=httpx.MockTransport(respond)
+    )
+
+    with pytest.raises(ValidationError):
+        run(provider.analyze_audio(b"ID3private-audio-marker", "audio/mpeg"))
+
+    assert "json_invalid" in caplog.text
+    assert "private-transcript-marker" not in caplog.text
+    assert "private-audio-marker" not in caplog.text
+    assert "gemini-test-secret" not in caplog.text
+    assert len(requests) == 1
+
+
+def test_gemini_audio_max_tokens_is_detected_before_parsing():
+    requests: list[httpx.Request] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "MAX_TOKENS",
+                        "content": {"parts": [{"text": '{"truncated":'}]},
+                    }
+                ],
+                "usageMetadata": {"candidatesTokenCount": 4000},
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(), transport=httpx.MockTransport(respond)
+    )
+
+    with pytest.raises(AIProviderError, match="token limit") as error:
+        run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
+
+    assert error.value.status_code is None
+    assert len(requests) == 1
+
+
+def test_gemini_audio_retries_http_503_once_then_parses_success():
+    requests: list[httpx.Request] = []
+    audio_output = AudioModelAnalysisOutput(
+        risk_level=RiskLevel.SUSPICIOUS,
+        summary="Cuộc gọi có nội dung cần kiểm tra.",
+        transcript="Lời thoại mẫu.",
+        detected_behaviors=[],
+        recommendations=["Xác minh người gọi."],
+    )
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "parts": [{"text": audio_output.model_dump_json()}]
+                        },
+                    }
+                ]
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(), transport=httpx.MockTransport(respond)
+    )
+
+    result = run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
+
+    assert len(requests) == 2
+    assert result.transcript == "Lời thoại mẫu."
+
+
+def test_gemini_audio_does_not_retry_second_http_503():
+    requests: list[httpx.Request] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(503)
+
+    provider = GeminiProvider(
+        configured_settings(), transport=httpx.MockTransport(respond)
+    )
+
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
+
+    assert error.value.status_code == 503
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize("status_code", [401, 429])
+def test_gemini_audio_does_not_retry_other_http_errors(status_code):
+    requests: list[httpx.Request] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status_code)
+
+    provider = GeminiProvider(
+        configured_settings(), transport=httpx.MockTransport(respond)
+    )
+
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
+
+    assert error.value.status_code == status_code
+    assert len(requests) == 1
