@@ -395,6 +395,181 @@ def test_scam_analysis_endpoint_returns_mocked_gemini_result(monkeypatch):
     assert provider.calls[0] == ("Gửi mã OTP cho tôi", "Tin nhắn từ người lạ")
 
 
+@pytest.mark.parametrize(
+    ("content", "output", "expected_risk", "expected_type"),
+    [
+        (
+            "Tin nhắn giả lập: Ngân hàng ABC thông báo tài khoản sẽ khóa trong 30 phút. "
+            "Truy cập https://example.invalid/xac-minh và nhập mật khẩu cùng mã OTP.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[
+                    {
+                        "type": "ACCOUNT_SECURITY_CHECK",
+                        "name_vi": "Dấu hiệu cần kiểm tra",
+                        "description": "Cần kiểm tra.",
+                        "evidence": "nhập mật khẩu cùng mã OTP",
+                        "explanation": "Yêu cầu thông tin.",
+                    }
+                ],
+                recommendations=["Xác minh."],
+            ),
+            RiskLevel.HIGH_RISK,
+            "CREDENTIAL_OTP_THEFT",
+        ),
+        (
+            "Ngân hàng ABC thông báo lịch bảo trì vào Chủ nhật. "
+            "Bạn có thể xem thông tin trong ứng dụng chính thức.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Thông báo bảo trì.",
+                detected_behaviors=[],
+                recommendations=["Không cần làm gì."],
+            ),
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "Cảnh báo an toàn: Ngân hàng không bao giờ yêu cầu nhập mật khẩu "
+            "hoặc OTP qua liên kết. Không bấm link lạ.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Đây là cảnh báo an toàn.",
+                detected_behaviors=[],
+                recommendations=["Không bấm link lạ."],
+            ),
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "Bài học an toàn: Kẻ gian có thể nhắn “hãy nhập OTP”; không làm theo.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.HIGH_RISK,
+                summary="Yêu cầu OTP.",
+                detected_behaviors=[
+                    {
+                        "type": "CREDENTIAL_OTP_THEFT",
+                        "name_vi": "Xin OTP",
+                        "description": "Yêu cầu mã.",
+                        "evidence": "hãy nhập OTP",
+                        "explanation": "Yêu cầu mã.",
+                    }
+                ],
+                recommendations=["Không cung cấp OTP."],
+            ),
+            RiskLevel.INSUFFICIENT_DATA,
+            None,
+        ),
+        (
+            "Ngân hàng ABC thông báo tài khoản khóa trong 30 phút. "
+            "Truy cập https://example.invalid và vui lòng nhập mật khẩu cùng mã OTP.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[
+                    {
+                        "type": "CREDENTIAL_OTP_THEFT",
+                        "name_vi": "Xin OTP",
+                        "description": "Yêu cầu thông tin.",
+                        "evidence": "Vui lòng nhập mật khẩu cùng mã OTP.",
+                        "explanation": "Yêu cầu thông tin.",
+                    }
+                ],
+                recommendations=["Xác minh."],
+            ),
+            RiskLevel.INSUFFICIENT_DATA,
+            None,
+        ),
+    ],
+    ids=[
+        "simulated-bank-phishing-is-high-risk",
+        "legitimate-bank-notice",
+        "security-warning-is-not-a-request",
+        "educational-quotation-is-not-a-request",
+        "unverified-quote-cannot-escalate",
+    ],
+)
+def test_scam_analysis_api_returns_verified_credential_classification(
+    monkeypatch, content, output, expected_risk, expected_type
+):
+    class StaticProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return output
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=StaticProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={"content": content, "allow_external_processing": True},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["risk_level"] == expected_risk.value
+    if expected_type:
+        finding = result["detected_behaviors"][0]
+        assert finding["type"] == expected_type
+        assert finding["name_vi"] == "Yêu cầu mật khẩu hoặc mã OTP"
+        assert "nhập mật khẩu" in result["summary"]
+        assert "Không truy cập liên kết" in result["recommendations"][0]
+    else:
+        assert result["detected_behaviors"] == []
+
+
+def test_scam_analysis_api_avoids_repeated_generic_finding_label(monkeypatch):
+    class GenericFindingProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[
+                    {
+                        "type": "FUTURE_TACTIC",
+                        "name_vi": "Nhãn không tin cậy",
+                        "description": "Mô tả không tin cậy.",
+                        "evidence": "Vui lòng xem lại thông tin.",
+                        "explanation": "Cần kiểm tra.",
+                    }
+                ],
+                recommendations=["Xác minh."],
+            )
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=GenericFindingProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={
+                "content": "Vui lòng xem lại thông tin.",
+                "allow_external_processing": True,
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["risk_level"] == "SUSPICIOUS"
+    assert result["summary"] == "Có dấu hiệu cần kiểm tra trong nội dung: “Vui lòng xem lại thông tin.”"
+    assert "Dấu hiệu cần kiểm tra: Dấu hiệu cần kiểm tra" not in result["summary"]
+
+
 def test_scam_analysis_endpoint_rejects_oversized_content():
     with TestClient(app) as client:
         response = client.post(

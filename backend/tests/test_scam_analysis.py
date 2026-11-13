@@ -711,7 +711,7 @@ def test_model_citation_with_wrapped_lines_preserves_original_excerpt():
     assert assessment.findings[0].evidence == "Gửi mã OTP\nđể xác minh."
 
 
-def test_unknown_model_behavior_does_not_expose_raw_label_or_description():
+def test_unknown_model_behavior_is_normalized_from_verified_credential_request():
     output = model_output(
         behavior_type="FUTURE_TACTIC",
         evidence="Gửi mã OTP cho tôi",
@@ -722,10 +722,8 @@ def test_unknown_model_behavior_does_not_expose_raw_label_or_description():
         "Gửi mã OTP cho tôi",
     )
 
-    assert assessment.findings[0].name_vi == "Dấu hiệu cần kiểm tra"
-    assert assessment.findings[0].description == (
-        "Đoạn trích này cần được xem xét trong ngữ cảnh."
-    )
+    assert assessment.findings[0].type == "CREDENTIAL_OTP_THEFT"
+    assert assessment.findings[0].name_vi == "Yêu cầu mật khẩu hoặc mã OTP"
     assert assessment.findings[0].explanation.startswith("Dấu hiệu này dựa trên đoạn trích")
 
 

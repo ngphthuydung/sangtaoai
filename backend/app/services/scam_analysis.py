@@ -232,6 +232,7 @@ class ScamAnalysisService:
                 CrossCheckStatus.NOT_REQUESTED,
                 "Mỗi yêu cầu chỉ sử dụng một nhà cung cấp AI.",
                 self._single_provider_method(primary_provider),
+                source_text=evidence_source,
             )
 
     async def analyze_image(
@@ -309,6 +310,7 @@ class ScamAnalysisService:
             "Ảnh được phân tích bằng Gemini Vision.",
             AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
             evidence_complete=text_status == ImageTextStatus.COMPLETED,
+            source_text=output.visible_text,
         )
         if text_status == ImageTextStatus.PARTIAL:
             result = result.model_copy(
@@ -408,6 +410,7 @@ class ScamAnalysisService:
             "Âm thanh được phiên âm và phân tích bằng Gemini.",
             AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
             evidence_complete=transcription_status == TranscriptionStatus.COMPLETED,
+            source_text=output.transcript,
         )
         if transcription_status == TranscriptionStatus.PARTIAL:
             result = result.model_copy(
@@ -454,8 +457,17 @@ class ScamAnalysisService:
         cross_check_summary: str,
         analysis_method: AnalysisMethod,
         evidence_complete: bool = True,
+        source_text: str = "",
     ) -> ScamAnalysisResponse:
         finding_types = {finding.type for finding in assessment.findings}
+        credential_findings = [
+            finding
+            for finding in assessment.findings
+            if finding.type == "CREDENTIAL_OTP_THEFT"
+            and EvidenceEngine.is_explicit_credential_request(
+                finding.evidence, source_text
+            )
+        ]
         high_risk_combination = (
             "AUTHORITY_IMPERSONATION" in finding_types
             and "UNUSUAL_PAYMENT_REQUEST" in finding_types
@@ -464,14 +476,33 @@ class ScamAnalysisService:
                 & {"THREATENED_CONSEQUENCES", "URGENCY_PRESSURE"}
             )
         )
+        bank_credential_link_combo = bool(credential_findings) and (
+            re.search(
+                r"\bngân hàng\b.{0,120}\b(?:thông báo|yêu cầu|vui lòng|tài khoản|xác minh|khóa)\b",
+                source_text,
+                re.IGNORECASE | re.DOTALL,
+            )
+            and re.search(r"(?:https?://|www\.)\S+", source_text, re.IGNORECASE)
+            and re.search(
+                r"\b(?:trong\s+(?:vòng\s+)?\d+\s*(?:phút|giờ|ngày)|"
+                r"(?:còn|chỉ còn)\s+\d+\s*(?:phút|giờ|ngày)|"
+                r"ngay lập tức|trước\s+\d{1,2}[:h]\d{2})\b",
+                source_text,
+                re.IGNORECASE,
+            )
+        )
         high_risk_supported = (
             output.risk_level == RiskLevel.HIGH_RISK
             and (
-                "CREDENTIAL_OTP_THEFT" in finding_types
+                bool(credential_findings)
                 or high_risk_combination
             )
         )
-        if high_risk_supported and evidence_complete:
+        if (
+            not invalid
+            and evidence_complete
+            and (high_risk_supported or bank_credential_link_combo)
+        ):
             risk = RiskLevel.HIGH_RISK
         elif (
             assessment.findings
@@ -504,6 +535,9 @@ class ScamAnalysisService:
                     item
                     for item in assessment.findings
                     if item.type == "CREDENTIAL_OTP_THEFT"
+                    and EvidenceEngine.is_explicit_credential_request(
+                        item.evidence, source_text
+                    )
                 ),
                 assessment.findings[0],
             )
@@ -512,11 +546,21 @@ class ScamAnalysisService:
                 f"Nội dung trích dẫn: “{finding.evidence}”"
             )
         elif risk == RiskLevel.SUSPICIOUS:
-            finding = assessment.findings[0]
-            summary = (
-                f"Có dấu hiệu cần kiểm tra: {finding.name_vi}. "
-                f"Nội dung trích dẫn: “{finding.evidence}”"
+            finding = next(
+                (
+                    item
+                    for item in assessment.findings
+                    if item.type == "CREDENTIAL_OTP_THEFT"
+                ),
+                assessment.findings[0],
             )
+            if finding.name_vi == "Dấu hiệu cần kiểm tra":
+                summary = f"Có dấu hiệu cần kiểm tra trong nội dung: “{finding.evidence}”"
+            else:
+                summary = (
+                    f"Có dấu hiệu cần kiểm tra: {finding.name_vi}. "
+                    f"Nội dung trích dẫn: “{finding.evidence}”"
+                )
         elif risk == RiskLevel.LOW_RISK:
             summary = (
                 "Chưa thấy dấu hiệu đáng ngờ rõ ràng trong nội dung đã gửi. "
@@ -554,7 +598,7 @@ class ScamAnalysisService:
         if risk == RiskLevel.HIGH_RISK:
             if "CREDENTIAL_OTP_THEFT" in finding_types:
                 return [
-                    "Không cung cấp OTP hoặc mật khẩu. Nếu đã gửi, hãy liên hệ tổ chức liên quan qua kênh chính thức."
+                    "Không truy cập liên kết hoặc cung cấp mật khẩu, OTP. Hãy xác minh qua ứng dụng, website hoặc số điện thoại chính thức do bạn tự tìm."
                 ]
             return [
                 "Không chuyển tiền theo yêu cầu này. Tự liên hệ cơ quan qua số điện thoại chính thức."
@@ -562,7 +606,7 @@ class ScamAnalysisService:
         if risk == RiskLevel.SUSPICIOUS:
             actions: list[str] = []
             if "CREDENTIAL_OTP_THEFT" in finding_types:
-                actions.append("Không chia sẻ OTP hoặc mật khẩu; tự liên hệ tổ chức qua kênh chính thức.")
+                actions.append("Không truy cập liên kết hoặc cung cấp mật khẩu, OTP; xác minh qua kênh chính thức do bạn tự tìm.")
             if "UNUSUAL_PAYMENT_REQUEST" in finding_types:
                 actions.append("Tạm dừng thanh toán; xác minh qua ứng dụng hoặc số điện thoại chính thức.")
             if "SUSPICIOUS_WEBSITE_REDIRECTION" in finding_types:

@@ -1,5 +1,6 @@
 """Validates, normalizes, and merges evidence returned by AI providers."""
 
+import re
 from dataclasses import dataclass
 
 from app.schemas.scam_analysis import DetectedBehavior, ModelAnalysisOutput
@@ -13,7 +14,7 @@ BEHAVIOR_CATALOG: dict[str, tuple[str, str]] = {
     "SECRECY_REQUEST": ("Yêu cầu giữ bí mật", "Ngăn người nhận chia sẻ hoặc xác minh với người đáng tin cậy."),
     "UNUSUAL_PAYMENT_REQUEST": ("Yêu cầu chuyển tiền bất thường", "Yêu cầu thanh toán hoặc chuyển tiền theo cách cần được xác minh."),
     "PERSONAL_DATA_HARVESTING": ("Thu thập dữ liệu cá nhân", "Yêu cầu thông tin cá nhân không rõ mục đích hoặc kênh bảo vệ."),
-    "CREDENTIAL_OTP_THEFT": ("Lừa lấy mật khẩu hoặc OTP", "Yêu cầu thông tin đăng nhập hoặc mã xác thực bí mật."),
+    "CREDENTIAL_OTP_THEFT": ("Yêu cầu mật khẩu hoặc mã OTP", "Nội dung yêu cầu người nhận cung cấp thông tin đăng nhập hoặc mã xác thực bí mật."),
     "RELATIONSHIP_IMPERSONATION": ("Giả danh người quen", "Mạo nhận mối quan hệ quen biết để tạo lòng tin hoặc nhờ vả."),
     "EMOTIONAL_MANIPULATION": ("Thao túng cảm xúc", "Khai thác cảm xúc để làm giảm khả năng cân nhắc độc lập."),
     "SCARCITY_MANIPULATION": ("Tạo cảm giác khan hiếm", "Tạo ấn tượng cơ hội sắp hết để thúc ép quyết định."),
@@ -23,6 +24,42 @@ BEHAVIOR_CATALOG: dict[str, tuple[str, str]] = {
     "COMBINED_MANIPULATION": ("Kết hợp nhiều kỹ thuật thao túng", "Nhiều hành vi phối hợp nhằm dẫn người nhận đến hành động rủi ro."),
 }
 
+_CREDENTIAL_TERMS = r"(?:mật khẩu|password|mã\s*otp|otp|mã xác thực|mã bảo mật)"
+_CREDENTIAL_REQUEST_PATTERNS = (
+    re.compile(
+        rf"\b(?:vui lòng\s+)?(?:hãy\s+)?(?:nhập|điền|cung cấp|gửi|chia sẻ|xác nhận)\b"
+        rf".{{0,80}}\b{_CREDENTIAL_TERMS}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b{_CREDENTIAL_TERMS}\b.{{0,80}}\b(?:gửi|cung cấp|nhập|điền|chia sẻ|xác nhận)\b",
+        re.IGNORECASE,
+    ),
+)
+_NEGATED_REQUEST = re.compile(
+    r"\b(?:không|đừng|chớ|chưa)\s+(?:(?:hãy|vui lòng)\s+)?"
+    r"(?:nhập|điền|cung cấp|gửi|chia sẻ|xác nhận)\b",
+    re.IGNORECASE,
+)
+_SAFE_EDUCATIONAL_CONTEXT = re.compile(
+    r"\b(?:cảnh báo(?: an toàn)?|bài học|ví dụ(?: minh họa)?|hướng dẫn|"
+    r"phòng tránh|kẻ gian|lừa đảo)\b.{0,160}\b"
+    r"(?:không làm theo|đừng làm theo|không bấm|không nhập|"
+    r"không cung cấp|không chia sẻ)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_explicit_credential_request(text: str, context: str = "") -> bool:
+    if context and _SAFE_EDUCATIONAL_CONTEXT.search(context):
+        return False
+    for pattern in _CREDENTIAL_REQUEST_PATTERNS:
+        for match in pattern.finditer(text):
+            match_context = text[max(0, match.start() - 45) : match.start() + 24]
+            if not _NEGATED_REQUEST.search(match_context):
+                return True
+    return False
+
 
 @dataclass(frozen=True)
 class EvidenceAssessment:
@@ -31,6 +68,10 @@ class EvidenceAssessment:
 
 
 class EvidenceEngine:
+    @staticmethod
+    def is_explicit_credential_request(text: str, context: str = "") -> bool:
+        return _is_explicit_credential_request(text, context)
+
     @staticmethod
     def _find_verbatim_excerpt(source: str, quote: str) -> str | None:
         def compact(value: str) -> tuple[str, list[int], list[int]]:
@@ -78,8 +119,13 @@ class EvidenceEngine:
             if excerpt is None:
                 invalid_count += 1
                 continue
+            behavior_type = finding.type
+            if _is_explicit_credential_request(excerpt, source_text):
+                behavior_type = "CREDENTIAL_OTP_THEFT"
+            elif behavior_type == "CREDENTIAL_OTP_THEFT":
+                continue
             name_vi, description = BEHAVIOR_CATALOG.get(
-                finding.type,
+                behavior_type,
                 (
                     "Dấu hiệu cần kiểm tra",
                     "Đoạn trích này cần được xem xét trong ngữ cảnh.",
@@ -87,7 +133,7 @@ class EvidenceEngine:
             )
             findings.append(
                 DetectedBehavior(
-                    type=finding.type,
+                    type=behavior_type,
                     name_vi=name_vi,
                     description=description,
                     evidence=excerpt,
