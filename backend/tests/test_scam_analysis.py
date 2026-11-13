@@ -1195,6 +1195,16 @@ def test_gemini_provider_classifies_invalid_json_as_invalid_response():
     assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
 
 
+def test_gemini_provider_rejects_incomplete_structured_analysis():
+    with pytest.raises(AIProviderError) as error:
+        GeminiProvider._validate_response(
+            '{"risk_level":"SUSPICIOUS"}',
+            ModelAnalysisOutput,
+        )
+
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
+
+
 def test_gemini_provider_detects_text_output_token_limit():
     async def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -476,21 +476,19 @@ class ScamAnalysisService:
                 & {"THREATENED_CONSEQUENCES", "URGENCY_PRESSURE"}
             )
         )
-        bank_credential_link_combo = bool(credential_findings) and (
-            re.search(
-                r"\bngân hàng\b.{0,120}\b(?:thông báo|yêu cầu|vui lòng|tài khoản|xác minh|khóa)\b",
-                source_text,
-                re.IGNORECASE | re.DOTALL,
-            )
-            and re.search(r"(?:https?://|www\.)\S+", source_text, re.IGNORECASE)
-            and re.search(
-                r"\b(?:trong\s+(?:vòng\s+)?\d+\s*(?:phút|giờ|ngày)|"
-                r"(?:còn|chỉ còn)\s+\d+\s*(?:phút|giờ|ngày)|"
-                r"ngay lập tức|trước\s+\d{1,2}[:h]\d{2})\b",
-                source_text,
-                re.IGNORECASE,
-            )
-        )
+        bank_credential_finding = None
+        bank_credential_context = ""
+        for finding in credential_findings:
+            context = EvidenceEngine.related_context(source_text, finding.evidence)
+            if (
+                EvidenceEngine.has_financial_organization_reference(context)
+                and EvidenceEngine.extract_url(context) is not None
+                and EvidenceEngine.extract_urgency(context) is not None
+            ):
+                bank_credential_finding = finding
+                bank_credential_context = context
+                break
+        bank_credential_link_combo = bank_credential_finding is not None
         high_risk_supported = (
             output.risk_level == RiskLevel.HIGH_RISK
             and (
@@ -499,9 +497,12 @@ class ScamAnalysisService:
             )
         )
         if (
+            evidence_complete
+            and bank_credential_link_combo
+        ) or (
             not invalid
             and evidence_complete
-            and (high_risk_supported or bank_credential_link_combo)
+            and high_risk_supported
         ):
             risk = RiskLevel.HIGH_RISK
         elif (
@@ -530,7 +531,7 @@ class ScamAnalysisService:
             risk = RiskLevel.INSUFFICIENT_DATA
 
         if risk == RiskLevel.HIGH_RISK:
-            finding = next(
+            finding = bank_credential_finding or next(
                 (
                     item
                     for item in assessment.findings
@@ -541,10 +542,27 @@ class ScamAnalysisService:
                 ),
                 assessment.findings[0],
             )
-            summary = (
-                f"Có dấu hiệu nguy cơ cao: {finding.name_vi}. "
-                f"Nội dung trích dẫn: “{finding.evidence}”"
-            )
+            if bank_credential_link_combo:
+                action = (
+                    "nhập"
+                    if EvidenceEngine.credential_request_uses_entry_verb(
+                        finding.evidence
+                    )
+                    else "cung cấp"
+                )
+                urgency = EvidenceEngine.extract_urgency(
+                    bank_credential_context
+                )
+                summary = (
+                    "Tin nhắn có nguy cơ lừa đảo cao vì yêu cầu "
+                    f"{action} {EvidenceEngine.credential_labels(finding.evidence)} "
+                    f"qua đường link, đồng thời gây áp lực bằng thời hạn “{urgency}”."
+                )
+            else:
+                summary = (
+                    "Có nguy cơ cao vì nội dung yêu cầu cung cấp thông tin xác thực. "
+                    f"Bằng chứng: “{finding.evidence}”"
+                )
         elif risk == RiskLevel.SUSPICIOUS:
             finding = next(
                 (
@@ -598,7 +616,7 @@ class ScamAnalysisService:
         if risk == RiskLevel.HIGH_RISK:
             if "CREDENTIAL_OTP_THEFT" in finding_types:
                 return [
-                    "Không truy cập liên kết hoặc cung cấp mật khẩu, OTP. Hãy xác minh qua ứng dụng, website hoặc số điện thoại chính thức do bạn tự tìm."
+                    "Không truy cập liên kết hoặc cung cấp mật khẩu, OTP. Hãy liên hệ ngân hàng qua ứng dụng hoặc số tổng đài chính thức bạn tự tìm."
                 ]
             return [
                 "Không chuyển tiền theo yêu cầu này. Tự liên hệ cơ quan qua số điện thoại chính thức."

@@ -478,8 +478,8 @@ def test_scam_analysis_endpoint_returns_mocked_gemini_result(monkeypatch):
                 ],
                 recommendations=["Xác minh."],
             ),
-            RiskLevel.INSUFFICIENT_DATA,
-            None,
+            RiskLevel.HIGH_RISK,
+            "CREDENTIAL_OTP_THEFT",
         ),
     ],
     ids=[
@@ -487,7 +487,7 @@ def test_scam_analysis_endpoint_returns_mocked_gemini_result(monkeypatch):
         "legitimate-bank-notice",
         "security-warning-is-not-a-request",
         "educational-quotation-is-not-a-request",
-        "unverified-quote-cannot-escalate",
+        "verified-credential-link-pressure-escalates",
     ],
 )
 def test_scam_analysis_api_returns_verified_credential_classification(
@@ -568,6 +568,316 @@ def test_scam_analysis_api_avoids_repeated_generic_finding_label(monkeypatch):
     assert result["risk_level"] == "SUSPICIOUS"
     assert result["summary"] == "Có dấu hiệu cần kiểm tra trong nội dung: “Vui lòng xem lại thông tin.”"
     assert "Dấu hiệu cần kiểm tra: Dấu hiệu cần kiểm tra" not in result["summary"]
+
+
+@pytest.mark.parametrize(
+    ("case_id", "content", "model_risk", "expected_risk", "evidence"),
+    [
+        (
+            "production-generic-finding",
+            "[TIN NHẮN GIẢ LẬP] Ngân hàng ABC thông báo tài khoản của quý khách "
+            "sẽ bị khóa trong 30 phút. Vui lòng truy cập "
+            "https://xac-minh-ngan-hang.example và nhập mật khẩu cùng mã OTP "
+            "để xác minh ngay.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+            "Ngân hàng ABC thông báo tài khoản của quý khách",
+        ),
+        (
+            "suspicious-with-multiple-signals",
+            "Ngân hàng ABC yêu cầu nhập mật khẩu và mã OTP qua "
+            "https://xac-minh.example trong vòng 30 phút để tránh khóa tài khoản.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+            "Ngân hàng ABC",
+        ),
+        (
+            "otp-warning",
+            "Cảnh báo an toàn: Ngân hàng không bao giờ yêu cầu nhập mật khẩu "
+            "hoặc OTP qua liên kết. Không chia sẻ OTP cho bất kỳ ai.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "ordinary-otp-authentication",
+            "Mã OTP dùng để xác thực đăng nhập. Không chia sẻ mã này.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "legitimate-advertisement",
+            "Ngân hàng ABC có chương trình ưu đãi phí thường niên. "
+            "Xem điều kiện trong ứng dụng chính thức.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "url-without-credential-request",
+            "Thông tin sản phẩm và điều kiện sử dụng tại "
+            "https://example.com/products.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "urgency-without-dangerous-action",
+            "Vui lòng phản hồi khảo sát trước 17:00 hôm nay để kịp tổng hợp.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.SUSPICIOUS,
+            "trước 17:00 hôm nay",
+        ),
+        (
+            "educational-article",
+            "Bài báo mô tả thủ đoạn lừa đảo: kẻ gian yêu cầu người đọc nhập "
+            "mật khẩu và mã OTP vào một liên kết giả.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+            None,
+        ),
+        (
+            "simulated-message",
+            "Kịch bản giả lập để kiểm thử: ngân hàng yêu cầu nhập mật khẩu "
+            "và mã OTP tại https://example.invalid trong 30 phút.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+            "ngân hàng",
+        ),
+        (
+            "missing-diacritics-and-irregular-spaces",
+            "Ngan hang ABC thong bao tai khoan bi khoa trong 30   phut. "
+            "Truy cap https://xac-minh.example va nhap mat   khau cung ma OTP.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+            "Ngan hang ABC",
+        ),
+    ],
+)
+def test_scam_analysis_api_calibrates_deterministic_credential_evidence(
+    monkeypatch, case_id, content, model_risk, expected_risk, evidence
+):
+    del case_id
+
+    class StaticProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return ModelAnalysisOutput(
+                risk_level=model_risk,
+                summary="Cần kiểm tra.",
+                detected_behaviors=(
+                    [
+                        {
+                            "type": "ACCOUNT_SECURITY_CHECK",
+                            "name_vi": "Dấu hiệu cần kiểm tra",
+                            "description": "Cần kiểm tra.",
+                            "evidence": evidence,
+                            "explanation": "Cần kiểm tra.",
+                        }
+                    ]
+                    if evidence
+                    else []
+                ),
+                recommendations=["Xác minh."],
+            )
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=StaticProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={"content": content, "allow_external_processing": True},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["risk_level"] == expected_risk.value
+    if expected_risk == RiskLevel.HIGH_RISK:
+        findings = result["detected_behaviors"]
+        credential = next(
+            item for item in findings if item["type"] == "CREDENTIAL_OTP_THEFT"
+        )
+        assert credential["evidence"] in content
+        assert (
+            "mật khẩu" in credential["evidence"].lower()
+            or "mat" in credential["evidence"].lower()
+        )
+        assert "otp" in credential["evidence"].lower()
+        assert any(
+            item["type"] == "SUSPICIOUS_WEBSITE_REDIRECTION"
+            and item["evidence"] in content
+            for item in findings
+        )
+        assert any(
+            item["type"] == "URGENCY_PRESSURE"
+            and item["evidence"] in content
+            for item in findings
+        )
+        assert "Dấu hiệu cần kiểm tra: Dấu hiệu cần kiểm tra" not in result["summary"]
+        assert (
+            "mật khẩu" in result["summary"].lower()
+            or "mat khau" in result["summary"].lower()
+        )
+        assert "otp" in result["summary"].lower()
+        assert "30" in result["summary"]
+        assert "phút" in result["summary"].lower() or "phut" in result["summary"].lower()
+        assert "Không truy cập" in result["recommendations"][0]
+        assert "OTP" in result["recommendations"][0]
+    if expected_risk == RiskLevel.LOW_RISK:
+        assert not any(
+            item["type"] == "CREDENTIAL_OTP_THEFT"
+            for item in result["detected_behaviors"]
+        )
+
+
+def test_scam_analysis_api_uses_specific_evidence_when_gemini_quote_is_generic(
+    monkeypatch,
+):
+    content = (
+        "[TIN NHẮN GIẢ LẬP] Ngân hàng ABC thông báo tài khoản của quý khách "
+        "sẽ bị khóa trong 30 phút. Vui lòng truy cập "
+        "https://xac-minh-ngan-hang.example và nhập mật khẩu cùng mã OTP "
+        "để xác minh ngay."
+    )
+
+    class GenericProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[
+                    {
+                        "type": "ACCOUNT_SECURITY_CHECK",
+                        "name_vi": "Dấu hiệu cần kiểm tra",
+                        "description": "Cần kiểm tra.",
+                        "evidence": "Ngân hàng ABC thông báo tài khoản của quý khách",
+                        "explanation": "Cần kiểm tra.",
+                    }
+                ],
+                recommendations=["Xác minh."],
+            )
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=GenericProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={"content": content, "allow_external_processing": True},
+        )
+
+    result = response.json()
+    assert result["risk_level"] == "HIGH_RISK"
+    assert result["detected_behaviors"][0]["type"] == "CREDENTIAL_OTP_THEFT"
+    assert "nhập mật khẩu cùng mã otp" in result["detected_behaviors"][0]["evidence"].lower()
+    assert result["summary"] == (
+        "Tin nhắn có nguy cơ lừa đảo cao vì yêu cầu nhập mật khẩu và mã OTP "
+        "qua đường link, đồng thời gây áp lực bằng thời hạn “trong 30 phút”."
+    )
+    assert "liên hệ ngân hàng" in result["recommendations"][0].lower()
+
+
+def test_scam_analysis_api_keeps_verified_source_evidence_despite_invalid_model_quote(
+    monkeypatch,
+):
+    content = (
+        "Ngân hàng ABC yêu cầu nhập mật khẩu và mã OTP tại "
+        "https://xac-minh.example trong 30 phút."
+    )
+
+    class InvalidQuoteProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[
+                    {
+                        "type": "ACCOUNT_SECURITY_CHECK",
+                        "name_vi": "Dấu hiệu cần kiểm tra",
+                        "description": "Cần kiểm tra.",
+                        "evidence": "Đoạn văn không có trong tin nhắn",
+                        "explanation": "Cần kiểm tra.",
+                    }
+                ],
+                recommendations=["Xác minh."],
+            )
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=InvalidQuoteProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={"content": content, "allow_external_processing": True},
+        )
+
+    result = response.json()
+    assert result["risk_level"] == "HIGH_RISK"
+    assert result["detected_behaviors"][0]["evidence"] in content
+    assert "mật khẩu" in result["summary"].lower()
+    assert "OTP" in result["recommendations"][0]
+
+
+def test_scam_analysis_api_does_not_let_an_earlier_warning_hide_a_later_request(
+    monkeypatch,
+):
+    class ConversationProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            return ModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Cần kiểm tra.",
+                detected_behaviors=[],
+                recommendations=["Xác minh."],
+            )
+
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(
+            gemini_provider=ConversationProvider(),
+            configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={
+                "content": (
+                    "Cảnh báo: Không chia sẻ OTP với bất kỳ ai.\n"
+                    "Người gửi sau yêu cầu hãy gửi mã OTP cho tôi."
+                ),
+                "allow_external_processing": True,
+            },
+        )
+
+    result = response.json()
+    assert result["risk_level"] == "SUSPICIOUS"
+    assert result["detected_behaviors"][0]["type"] == "CREDENTIAL_OTP_THEFT"
+    assert result["detected_behaviors"][0]["evidence"] == "gửi mã OTP"
 
 
 def test_scam_analysis_endpoint_rejects_oversized_content():

@@ -2,10 +2,20 @@
 Health check endpoint for Lá Chắn Người Thân Backend.
 """
 from datetime import datetime, timezone
+import os
+import re
+
 from fastapi import APIRouter
+
 from app.core.config import settings
 
 router = APIRouter(tags=["Hệ Thống / Health"])
+_GIT_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}", re.IGNORECASE)
+
+
+def _render_revision() -> str | None:
+    revision = os.getenv("RENDER_GIT_COMMIT", "")
+    return revision if _GIT_REVISION_PATTERN.fullmatch(revision) else None
 
 
 @router.get(
@@ -22,5 +32,6 @@ async def check_health():
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
+        "revision": _render_revision(),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
