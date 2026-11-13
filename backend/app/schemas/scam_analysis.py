@@ -12,6 +12,19 @@ class RiskLevel(str, Enum):
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 
 
+class AnalysisStatus(str, Enum):
+    COMPLETED = "COMPLETED"
+    NOT_ANALYZED = "NOT_ANALYZED"
+    FAILED = "FAILED"
+
+
+class AnalysisFailureReason(str, Enum):
+    AI_UNAVAILABLE = "AI_UNAVAILABLE"
+    INVALID_RESPONSE = "INVALID_RESPONSE"
+    TIMEOUT = "TIMEOUT"
+    HTTP_ERROR = "HTTP_ERROR"
+
+
 class BehaviorType(str, Enum):
     URGENCY_PRESSURE = "URGENCY_PRESSURE"
     AUTHORITY_IMPERSONATION = "AUTHORITY_IMPERSONATION"
@@ -81,6 +94,8 @@ class ScamAnalysisResponse(BaseModel):
     summary: str
     detected_behaviors: list[DetectedBehavior] = Field(max_length=30)
     recommendations: list[str] = Field(max_length=7)
+    analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
+    analysis_failure_reason: AnalysisFailureReason | None = None
     unverified_information: list[str] = Field(default_factory=list, max_length=10)
     verification_status: VerificationStatus = VerificationStatus.NOT_VERIFIED
     cross_check_status: CrossCheckStatus = CrossCheckStatus.NOT_REQUESTED

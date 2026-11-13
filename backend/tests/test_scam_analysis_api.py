@@ -7,6 +7,8 @@ from app.api.v1.scam_analysis import get_scam_analysis_service
 from app.core.config import Settings
 from app.main import app
 from app.schemas.scam_analysis import (
+    AnalysisFailureReason,
+    AnalysisStatus,
     AudioModelAnalysisOutput,
     ImageModelAnalysisOutput,
     ModelAnalysisOutput,
@@ -201,7 +203,7 @@ def test_audio_endpoint_reports_gemini_unavailable_without_fake_result(monkeypat
         )
 
     assert response.status_code == 503
-    assert "Gemini chưa được bật" in response.json()["detail"]
+    assert response.json()["detail"] == "Không thể phân tích do dịch vụ AI gặp sự cố."
 
 
 def test_audio_endpoint_reports_provider_failure_without_logging_audio(
@@ -231,8 +233,7 @@ def test_audio_endpoint_reports_provider_failure_without_logging_audio(
         )
 
     assert response.status_code == 503
-    assert "Gemini hiện không khả dụng" in response.json()["detail"]
-    assert "HTTP 401" in response.json()["detail"]
+    assert response.json()["detail"] == "Không thể phân tích do dịch vụ AI gặp sự cố."
     assert "0912345678" not in caplog.text
 def test_scam_analysis_endpoint_requires_consent_before_provider_call(monkeypatch):
     provider = MockGeminiProvider()
@@ -282,6 +283,7 @@ def test_scam_analysis_endpoint_returns_mocked_gemini_result(monkeypatch):
     assert response.status_code == 200
     assert response.json()["analysis_method"] == "GEMINI_CONTEXTUAL_ANALYSIS"
     assert response.json()["risk_level"] == "HIGH_RISK"
+    assert response.json()["analysis_status"] == "COMPLETED"
     assert len(provider.calls) == 1
     assert provider.calls[0] == ("Gửi mã OTP cho tôi", "Tin nhắn từ người lạ")
 
@@ -294,6 +296,53 @@ def test_scam_analysis_endpoint_rejects_oversized_content():
         )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("failure_reason", "provider_error"),
+    [
+        (AnalysisFailureReason.AI_UNAVAILABLE, "unavailable"),
+        (AnalysisFailureReason.INVALID_RESPONSE, "invalid response"),
+        (AnalysisFailureReason.TIMEOUT, "timed out"),
+        (AnalysisFailureReason.HTTP_ERROR, "HTTP error"),
+    ],
+)
+def test_scam_analysis_endpoint_reports_ai_failure_separately_from_insufficient_evidence(
+    monkeypatch, failure_reason, provider_error
+):
+    class FailingProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            raise AIProviderError(
+                provider_error,
+                status_code=502 if failure_reason == AnalysisFailureReason.HTTP_ERROR else None,
+                failure_reason=failure_reason,
+            )
+
+    service = ScamAnalysisService(
+        gemini_provider=FailingProvider(),
+        configuration=Settings(AI_ENABLED=True, OPENAI_API_KEY=None),
+    )
+    install_analysis_service(monkeypatch, service)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={
+                "content": (
+                    "Ngân hàng ABC yêu cầu mật khẩu và mã OTP để xác minh tài khoản."
+                ),
+                "allow_external_processing": True,
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["risk_level"] == "INSUFFICIENT_DATA"
+    assert result["analysis_status"] == AnalysisStatus.FAILED.value
+    assert result["analysis_failure_reason"] == failure_reason.value
+    assert result["summary"] == "Không thể phân tích do dịch vụ AI gặp sự cố."
 
 
 def test_image_endpoint_requires_explicit_consent(monkeypatch):
@@ -412,4 +461,4 @@ def test_image_endpoint_reports_gemini_unavailable_without_fake_result(monkeypat
         )
 
     assert response.status_code == 503
-    assert "Gemini chưa được bật" in response.json()["detail"]
+    assert response.json()["detail"] == "Không thể phân tích do dịch vụ AI gặp sự cố."

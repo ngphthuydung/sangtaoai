@@ -3,11 +3,15 @@
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
 from app.schemas.scam_analysis import (
+    AnalysisFailureReason,
+    AnalysisStatus,
     AnalysisMethod,
     AudioModelAnalysisOutput,
     CrossCheckStatus,
@@ -29,6 +33,11 @@ from app.services.ai_providers import (
 from app.services.evidence_engine import EvidenceAssessment, EvidenceEngine
 
 logger = logging.getLogger(__name__)
+AI_FAILURE_MESSAGE = "Không thể phân tích do dịch vụ AI gặp sự cố."
+AI_RETRY_ATTEMPTS = 2
+AI_RETRY_DELAY_SECONDS = 0.25
+AI_TOTAL_TIMEOUT_CAP_SECONDS = 55.0
+ResultT = TypeVar("ResultT")
 
 
 class ImageAnalysisUnavailable(Exception):
@@ -59,6 +68,62 @@ class ScamAnalysisService:
         self.evidence_engine = evidence_engine or EvidenceEngine()
         self._semaphore = asyncio.Semaphore(configuration.AI_MAX_CONCURRENT_REQUESTS)
 
+    async def _call_provider_with_retry(
+        self,
+        provider_name: str,
+        operation: Callable[[], Awaitable[ResultT]],
+    ) -> ResultT:
+        loop = asyncio.get_running_loop()
+        timeout_budget = min(
+            self.configuration.AI_TIMEOUT_SECONDS * AI_RETRY_ATTEMPTS
+            + AI_RETRY_DELAY_SECONDS,
+            AI_TOTAL_TIMEOUT_CAP_SECONDS,
+        )
+        deadline = loop.time() + timeout_budget
+        last_error: AIProviderError | None = None
+
+        for attempt in range(AI_RETRY_ATTEMPTS):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+
+            try:
+                return await asyncio.wait_for(
+                    operation(),
+                    timeout=min(self.configuration.AI_TIMEOUT_SECONDS, remaining),
+                )
+            except AIProviderError as error:
+                last_error = error
+                retryable = error.retryable
+            except TimeoutError:
+                last_error = AIProviderError(
+                    "Nhà cung cấp AI hết thời gian chờ",
+                    failure_reason=AnalysisFailureReason.TIMEOUT,
+                    retryable=True,
+                )
+                retryable = True
+
+            if not retryable or attempt + 1 == AI_RETRY_ATTEMPTS:
+                raise last_error
+
+            remaining = deadline - loop.time()
+            if remaining <= AI_RETRY_DELAY_SECONDS:
+                break
+            logger.info(
+                "%s transient failure (reason=%s, status=%s); retrying once",
+                provider_name,
+                last_error.failure_reason.value,
+                last_error.status_code,
+            )
+            await asyncio.sleep(AI_RETRY_DELAY_SECONDS)
+
+        if last_error is not None:
+            raise last_error
+        raise AIProviderError(
+            "AI provider request exceeded its time budget",
+            failure_reason=AnalysisFailureReason.TIMEOUT,
+        )
+
     async def analyze(self, request: ScamAnalysisRequest) -> ScamAnalysisResponse:
         if not request.allow_external_processing:
             return self._unavailable(AnalysisMethod.EXTERNAL_ANALYSIS_NOT_CONSENTED)
@@ -71,7 +136,10 @@ class ScamAnalysisService:
         if primary_provider is None:
             primary_provider = self.openai_provider or self._configured_openai()
         if primary_provider is None:
-            return self._unavailable(AnalysisMethod.LLM_NOT_CONFIGURED)
+            return self._unavailable(
+                AnalysisMethod.LLM_NOT_CONFIGURED,
+                AnalysisFailureReason.AI_UNAVAILABLE,
+            )
 
         safe_content = redact_sensitive_data(request.content)
         safe_context = redact_sensitive_data(request.context) if request.context else None
@@ -80,25 +148,46 @@ class ScamAnalysisService:
         async with self._semaphore:
             try:
                 primary = await asyncio.wait_for(
-                    primary_provider.analyze(safe_content, safe_context),
-                    timeout=self.configuration.AI_TIMEOUT_SECONDS,
+                    self._call_provider_with_retry(
+                        primary_provider.name,
+                        lambda: primary_provider.analyze(safe_content, safe_context),
+                    ),
+                    timeout=AI_TOTAL_TIMEOUT_CAP_SECONDS + 1,
                 )
-            except (
-                AIProviderError,
-                TimeoutError,
-                ValueError,
-                KeyError,
-                IndexError,
-                TypeError,
-                ValidationError,
-            ) as error:
+            except AIProviderError as error:
                 logger.warning(
-                    "%s analysis failed (provider_status=%s, error=%s)",
+                    "%s analysis failed (failure_reason=%s, provider_status=%s, error=%s)",
                     primary_provider.name,
+                    error.failure_reason.value,
                     error.status_code if isinstance(error, AIProviderError) else None,
                     type(error).__name__,
                 )
-                return self._unavailable(AnalysisMethod.LLM_UNAVAILABLE)
+                return self._unavailable(
+                    AnalysisMethod.LLM_UNAVAILABLE,
+                    error.failure_reason,
+                )
+            except TimeoutError as error:
+                logger.warning(
+                    "%s analysis failed (failure_reason=%s, error=%s)",
+                    primary_provider.name,
+                    AnalysisFailureReason.TIMEOUT.value,
+                    type(error).__name__,
+                )
+                return self._unavailable(
+                    AnalysisMethod.LLM_UNAVAILABLE,
+                    AnalysisFailureReason.TIMEOUT,
+                )
+            except (ValueError, KeyError, IndexError, TypeError, ValidationError) as error:
+                logger.warning(
+                    "%s analysis failed (failure_reason=%s, error=%s)",
+                    primary_provider.name,
+                    AnalysisFailureReason.INVALID_RESPONSE.value,
+                    type(error).__name__,
+                )
+                return self._unavailable(
+                    AnalysisMethod.LLM_UNAVAILABLE,
+                    AnalysisFailureReason.INVALID_RESPONSE,
+                )
 
             primary_assessment = self.evidence_engine.assess(
                 primary,
@@ -122,15 +211,16 @@ class ScamAnalysisService:
     ) -> ScamAnalysisResponse:
         provider = self.image_provider or self._configured_gemini()
         if provider is None:
-            raise ImageAnalysisUnavailable(
-                "Gemini chưa được bật hoặc chưa cấu hình API key; ảnh chưa được phân tích."
-            )
+            raise ImageAnalysisUnavailable(AI_FAILURE_MESSAGE)
 
         try:
             async with self._semaphore:
                 output: ImageModelAnalysisOutput = await asyncio.wait_for(
-                    provider.analyze_image(image, mime_type),
-                    timeout=self.configuration.AI_TIMEOUT_SECONDS,
+                    self._call_provider_with_retry(
+                        provider.name,
+                        lambda: provider.analyze_image(image, mime_type),
+                    ),
+                    timeout=AI_TOTAL_TIMEOUT_CAP_SECONDS + 1,
                 )
         except (
             AIProviderError,
@@ -147,7 +237,7 @@ class ScamAnalysisService:
                 type(error).__name__,
             )
             raise ImageAnalysisUnavailable(
-                "Gemini hiện không khả dụng hoặc không trả về kết quả hợp lệ; ảnh chưa được phân tích."
+                AI_FAILURE_MESSAGE
             ) from error
 
         assessment = self.evidence_engine.assess(
@@ -170,15 +260,16 @@ class ScamAnalysisService:
     ) -> ScamAnalysisResponse:
         provider = self.audio_provider or self._configured_gemini()
         if provider is None:
-            raise AudioAnalysisUnavailable(
-                "Gemini chưa được bật hoặc chưa cấu hình API key; âm thanh chưa được phân tích."
-            )
+            raise AudioAnalysisUnavailable(AI_FAILURE_MESSAGE)
 
         try:
             async with self._semaphore:
                 output: AudioModelAnalysisOutput = await asyncio.wait_for(
-                    provider.analyze_audio(audio, mime_type),
-                    timeout=self.configuration.AI_TIMEOUT_SECONDS,
+                    self._call_provider_with_retry(
+                        provider.name,
+                        lambda: provider.analyze_audio(audio, mime_type),
+                    ),
+                    timeout=AI_TOTAL_TIMEOUT_CAP_SECONDS + 1,
                 )
         except (
             AIProviderError,
@@ -194,14 +285,8 @@ class ScamAnalysisService:
                 error.status_code if isinstance(error, AIProviderError) else None,
                 type(error).__name__,
             )
-            status_detail = (
-                f" (HTTP {error.status_code})"
-                if isinstance(error, AIProviderError) and error.status_code
-                else ""
-            )
             raise AudioAnalysisUnavailable(
-                f"Gemini hiện không khả dụng{status_detail} hoặc không trả về kết quả hợp lệ; "
-                "âm thanh chưa được phân tích."
+                AI_FAILURE_MESSAGE
             ) from error
 
         assessment = self.evidence_engine.assess(
@@ -300,7 +385,10 @@ class ScamAnalysisService:
         )
 
     @staticmethod
-    def _unavailable(method: AnalysisMethod) -> ScamAnalysisResponse:
+    def _unavailable(
+        method: AnalysisMethod,
+        failure_reason: AnalysisFailureReason | None = None,
+    ) -> ScamAnalysisResponse:
         summaries = {
             AnalysisMethod.EXTERNAL_ANALYSIS_NOT_CONSENTED: (
                 "Chưa phân tích vì chưa có đồng ý gửi dữ liệu đến dịch vụ AI bên ngoài."
@@ -308,12 +396,12 @@ class ScamAnalysisService:
             AnalysisMethod.INPUT_LIMIT_EXCEEDED: (
                 "Nội dung vượt giới hạn phân tích; chưa thể đưa ra đánh giá."
             ),
-            AnalysisMethod.LLM_NOT_CONFIGURED: (
-                "Chưa có nhà cung cấp AI được bật và cấu hình; hệ thống không tạo kết quả giả lập."
-            ),
-            AnalysisMethod.LLM_UNAVAILABLE: (
-                "Dịch vụ AI không khả dụng hoặc trả kết quả không hợp lệ; chưa thể kết luận."
-            ),
+            AnalysisMethod.LLM_NOT_CONFIGURED: AI_FAILURE_MESSAGE,
+            AnalysisMethod.LLM_UNAVAILABLE: AI_FAILURE_MESSAGE,
+        }
+        failed = method in {
+            AnalysisMethod.LLM_NOT_CONFIGURED,
+            AnalysisMethod.LLM_UNAVAILABLE,
         }
         return ScamAnalysisResponse(
             risk_level=RiskLevel.INSUFFICIENT_DATA,
@@ -323,6 +411,14 @@ class ScamAnalysisService:
                 "Chưa cung cấp mật khẩu, mã OTP hoặc thông tin tài chính.",
                 "Tự xác minh người gửi qua kênh chính thức mà bạn chủ động tìm được.",
             ],
+            analysis_status=(
+                AnalysisStatus.FAILED if failed else AnalysisStatus.NOT_ANALYZED
+            ),
+            analysis_failure_reason=(
+                failure_reason or AnalysisFailureReason.AI_UNAVAILABLE
+                if failed
+                else None
+            ),
             analysis_method=method,
             limitations=["Không có kết quả phân tích AI cho nội dung này."],
         )

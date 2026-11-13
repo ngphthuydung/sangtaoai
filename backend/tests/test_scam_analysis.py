@@ -6,10 +6,11 @@ import json
 
 import httpx
 import pytest
-from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.schemas.scam_analysis import (
+    AnalysisFailureReason,
+    AnalysisStatus,
     AnalysisMethod,
     AudioModelAnalysisOutput,
     CrossCheckStatus,
@@ -139,6 +140,144 @@ def test_gemini_failure_does_not_fall_back_to_openai():
     assert len(gemini.calls) == 1
 
 
+@pytest.mark.parametrize("mode", ["text", "image", "audio"])
+def test_transient_provider_failure_retries_once_without_changing_input(mode):
+    class FlakyProvider:
+        name = "gemini"
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object, str | None]] = []
+
+        def _record(self, kind: str, data: object, mime_type: str | None = None) -> None:
+            self.calls.append((kind, data, mime_type))
+            if len(self.calls) == 1:
+                raise AIProviderError(
+                    "temporary upstream failure",
+                    status_code=503,
+                    failure_reason=AnalysisFailureReason.HTTP_ERROR,
+                    retryable=True,
+                )
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            self._record("text", content, context)
+            return model_output(evidence="mã OTP")
+
+        async def analyze_image(
+            self, image: bytes, mime_type: str
+        ) -> ImageModelAnalysisOutput:
+            self._record("image", image, mime_type)
+            return ImageModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Ảnh có dấu hiệu cần kiểm tra.",
+                visible_text="Gửi mã OTP",
+                detected_behaviors=[],
+                recommendations=["Không chia sẻ mã xác thực."],
+            )
+
+        async def analyze_audio(
+            self, audio: bytes, mime_type: str
+        ) -> AudioModelAnalysisOutput:
+            self._record("audio", audio, mime_type)
+            return AudioModelAnalysisOutput(
+                risk_level=RiskLevel.SUSPICIOUS,
+                summary="Âm thanh có dấu hiệu cần kiểm tra.",
+                transcript="Gửi mã OTP",
+                detected_behaviors=[],
+                recommendations=["Không chia sẻ mã xác thực."],
+            )
+
+    provider = FlakyProvider()
+    service = ScamAnalysisService(
+        gemini_provider=provider,
+        image_provider=provider,
+        audio_provider=provider,
+        configuration=configured_settings(OPENAI_API_KEY=None),
+    )
+
+    async def perform_analysis():
+        if mode == "text":
+            content = "Ngân hàng yêu cầu mã OTP"
+            return await service.analyze(
+                ScamAnalysisRequest(content=content, allow_external_processing=True)
+            ), ("text", content, None)
+        if mode == "image":
+            image = b"\x89PNG\r\n\x1a\noriginal-image"
+            return await service.analyze_image(image, "image/png"), (
+                "image",
+                image,
+                "image/png",
+            )
+        audio = b"ID3original-audio"
+        return await service.analyze_audio(audio, "audio/mpeg"), (
+            "audio",
+            audio,
+            "audio/mpeg",
+        )
+
+    _, expected_call = run(perform_analysis())
+
+    assert provider.calls == [expected_call, expected_call]
+
+
+def test_permanent_provider_error_is_not_retried():
+    class UnauthorizedProvider:
+        name = "gemini"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            self.calls += 1
+            raise AIProviderError(
+                "unauthorized",
+                status_code=401,
+                failure_reason=AnalysisFailureReason.HTTP_ERROR,
+            )
+
+    provider = UnauthorizedProvider()
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=provider,
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(content="Nội dung", allow_external_processing=True)
+        )
+    )
+
+    assert provider.calls == 1
+    assert result.analysis_failure_reason == AnalysisFailureReason.HTTP_ERROR
+
+
+def test_transient_provider_error_obeys_retry_limit():
+    class AlwaysUnavailableProvider:
+        name = "gemini"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            self.calls += 1
+            raise AIProviderError(
+                "upstream unavailable",
+                status_code=503,
+                failure_reason=AnalysisFailureReason.HTTP_ERROR,
+                retryable=True,
+            )
+
+    provider = AlwaysUnavailableProvider()
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=provider,
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(content="Nội dung", allow_external_processing=True)
+        )
+    )
+
+    assert provider.calls == 2
+    assert result.analysis_failure_reason == AnalysisFailureReason.HTTP_ERROR
+
+
 def test_openai_is_optional_fallback_when_gemini_is_not_configured(monkeypatch):
     openai = FakeProvider("openai", model_output())
     monkeypatch.setattr(
@@ -259,6 +398,8 @@ def test_provider_timeout_returns_unavailable_result():
 
     assert result.analysis_method == AnalysisMethod.LLM_UNAVAILABLE
     assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.analysis_status == AnalysisStatus.FAILED
+    assert result.analysis_failure_reason == AnalysisFailureReason.TIMEOUT
 
 
 def test_low_risk_gemini_result_does_not_spend_call_on_openai():
@@ -326,6 +467,124 @@ def test_gemini_unavailable_returns_insufficient_data_without_openai_fallback():
 
     assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
     assert result.analysis_method == AnalysisMethod.LLM_UNAVAILABLE
+    assert result.analysis_status == AnalysisStatus.FAILED
+    assert result.analysis_failure_reason == AnalysisFailureReason.AI_UNAVAILABLE
+    assert result.summary == "Không thể phân tích do dịch vụ AI gặp sự cố."
+
+
+def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
+    gemini = FakeProvider(
+        "gemini",
+        ModelAnalysisOutput(
+            risk_level=RiskLevel.INSUFFICIENT_DATA,
+            summary="Chưa có đủ căn cứ để kết luận.",
+            detected_behaviors=[],
+            recommendations=["Xác minh qua kênh chính thức."],
+        ),
+    )
+    service = ScamAnalysisService(
+        gemini_provider=gemini,
+        configuration=configured_settings(OPENAI_API_KEY=None),
+    )
+
+    result = run(
+        service.analyze(
+            ScamAnalysisRequest(content="Thông báo chung", allow_external_processing=True)
+        )
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.analysis_status == AnalysisStatus.COMPLETED
+    assert result.analysis_failure_reason is None
+
+
+@pytest.mark.parametrize(
+    "failure_reason",
+    [
+        AnalysisFailureReason.AI_UNAVAILABLE,
+        AnalysisFailureReason.INVALID_RESPONSE,
+        AnalysisFailureReason.TIMEOUT,
+        AnalysisFailureReason.HTTP_ERROR,
+    ],
+)
+def test_ai_failure_reason_is_distinct_from_insufficient_evidence(failure_reason):
+    class FailingProvider:
+        name = "gemini"
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            raise AIProviderError(
+                "mock failure",
+                failure_reason=failure_reason,
+            )
+
+    service = ScamAnalysisService(
+        gemini_provider=FailingProvider(),
+        configuration=configured_settings(OPENAI_API_KEY=None),
+    )
+    result = run(
+        service.analyze(
+            ScamAnalysisRequest(content="Tin nhắn giả lập", allow_external_processing=True)
+        )
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.analysis_status == AnalysisStatus.FAILED
+    assert result.analysis_failure_reason == failure_reason
+    assert result.summary == "Không thể phân tích do dịch vụ AI gặp sự cố."
+
+
+def test_gemini_analyzes_simulated_bank_password_and_otp_phishing_message():
+    message = (
+        "Ngân hàng ABC: Tài khoản của bạn sẽ bị khóa hôm nay. "
+        "Vui lòng gửi mật khẩu và mã OTP để xác minh tài khoản."
+    )
+    evidence = "gửi mật khẩu và mã OTP"
+    output = ModelAnalysisOutput(
+        risk_level=RiskLevel.HIGH_RISK,
+        summary="Tin nhắn yêu cầu thông tin xác thực nhạy cảm.",
+        detected_behaviors=[
+            {
+                "type": "CREDENTIAL_OTP_THEFT",
+                "name_vi": "Yêu cầu mật khẩu và mã OTP",
+                "description": "Tin nhắn yêu cầu thông tin đăng nhập và mã xác thực.",
+                "evidence": evidence,
+                "explanation": "Không nên chia sẻ thông tin xác thực qua tin nhắn.",
+            }
+        ],
+        recommendations=["Không gửi mật khẩu hoặc mã OTP."],
+    )
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {"parts": [{"text": output.model_dump_json()}]},
+                    }
+                ]
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(OPENAI_API_KEY=None),
+        transport=httpx.MockTransport(respond),
+    )
+    service = ScamAnalysisService(
+        gemini_provider=provider,
+        configuration=configured_settings(OPENAI_API_KEY=None),
+    )
+    result = run(
+        service.analyze(
+            ScamAnalysisRequest(content=message, allow_external_processing=True)
+        )
+    )
+
+    assert result.risk_level == RiskLevel.HIGH_RISK
+    assert result.analysis_status == AnalysisStatus.COMPLETED
+    assert result.analysis_failure_reason is None
+    assert result.detected_behaviors[0].evidence == evidence
 
 
 def test_openai_provider_uses_mock_http_and_treats_content_as_user_data():
@@ -398,6 +657,65 @@ def test_gemini_provider_preserves_http_error_without_retry(status_code):
 
     assert len(requests) == 1
     assert error.value.status_code == status_code
+    assert error.value.failure_reason == AnalysisFailureReason.HTTP_ERROR
+
+
+def test_gemini_provider_classifies_invalid_json_as_invalid_response():
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"candidates": [{"content": {"parts": [{"text": '{"risk_level":'}]}}]},
+        )
+
+    provider = GeminiProvider(
+        configured_settings(),
+        transport=httpx.MockTransport(respond),
+    )
+
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze("Tin nhắn", None))
+
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
+
+
+def test_gemini_provider_detects_text_output_token_limit():
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "MAX_TOKENS",
+                        "content": {"parts": [{"text": '{"risk_level":'}]},
+                    }
+                ]
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(),
+        transport=httpx.MockTransport(respond),
+    )
+
+    with pytest.raises(AIProviderError, match="token limit") as error:
+        run(provider.analyze("Tin nhắn", None))
+
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
+
+
+def test_gemini_provider_classifies_http_timeout():
+    async def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("upstream timeout", request=request)
+
+    provider = GeminiProvider(
+        configured_settings(),
+        transport=httpx.MockTransport(timeout),
+    )
+
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze("Tin nhắn", None))
+
+    assert error.value.failure_reason == AnalysisFailureReason.TIMEOUT
 
 
 def test_gemini_provider_sends_image_inline_and_validates_response():
@@ -560,9 +878,10 @@ def test_gemini_audio_truncated_json_is_rejected_without_logging_response(caplog
         configured_settings(), transport=httpx.MockTransport(respond)
     )
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(AIProviderError) as error:
         run(provider.analyze_audio(b"ID3private-audio-marker", "audio/mpeg"))
 
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
     assert "json_invalid" in caplog.text
     assert "private-transcript-marker" not in caplog.text
     assert "private-audio-marker" not in caplog.text
@@ -596,10 +915,11 @@ def test_gemini_audio_max_tokens_is_detected_before_parsing():
         run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
 
     assert error.value.status_code is None
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
     assert len(requests) == 1
 
 
-def test_gemini_audio_retries_http_503_once_then_parses_success():
+def test_gemini_audio_adapter_leaves_retries_to_service_orchestrator():
     requests: list[httpx.Request] = []
     audio_output = AudioModelAnalysisOutput(
         risk_level=RiskLevel.SUSPICIOUS,
@@ -631,13 +951,15 @@ def test_gemini_audio_retries_http_503_once_then_parses_success():
         configured_settings(), transport=httpx.MockTransport(respond)
     )
 
-    result = run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
 
-    assert len(requests) == 2
-    assert result.transcript == "Lời thoại mẫu."
+    assert error.value.status_code == 503
+    assert error.value.retryable
+    assert len(requests) == 1
 
 
-def test_gemini_audio_does_not_retry_second_http_503():
+def test_gemini_audio_does_not_retry_http_503_inside_provider_adapter():
     requests: list[httpx.Request] = []
 
     async def respond(request: httpx.Request) -> httpx.Response:
@@ -652,7 +974,8 @@ def test_gemini_audio_does_not_retry_second_http_503():
         run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
 
     assert error.value.status_code == 503
-    assert len(requests) == 2
+    assert error.value.retryable
+    assert len(requests) == 1
 
 
 @pytest.mark.parametrize("status_code", [401, 429])
@@ -671,4 +994,5 @@ def test_gemini_audio_does_not_retry_other_http_errors(status_code):
         run(provider.analyze_audio(b"ID3mock-mp3", "audio/mpeg"))
 
     assert error.value.status_code == status_code
+    assert not error.value.retryable
     assert len(requests) == 1

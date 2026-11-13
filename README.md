@@ -18,17 +18,15 @@ la-chan-nguoi-than/
 │   ├── tests/test_health.py       # Bộ kiểm thử tự động với Pytest
 │   ├── requirements.txt           # Danh mục thư viện Python
 │   ├── .env.example               # Mẫu biến môi trường an toàn
-│   └── .env                       # Biến môi trường cục bộ (không commit Git)
-│
-├── frontend/                      # Giao diện Web Responsive (React + TypeScript + Tailwind CSS)
-│   ├── src/
-│   │   ├── App.tsx                # Giao diện kiểm tra kết nối hệ thống
-│   │   ├── main.tsx               # Điểm khởi chạy của React
-│   │   └── index.css              # Cấu hình Tailwind CSS
-│   ├── package.json               # Danh mục thư viện Frontend
-│   ├── tailwind.config.js         # Cấu hình giao diện & bảng màu
-│   ├── .env.example               # Mẫu cấu hình URL Backend cho Frontend
-│   └── .env                       # Cấu hình cục bộ (không commit Git)
+│   ├── .env                       # Biến môi trường cục bộ (không commit Git)
+│   └── frontend/                  # Giao diện Web Responsive (React + TypeScript + Vite)
+│       ├── src/
+│       │   ├── App.tsx            # Giao diện Preview V2
+│       │   ├── main.tsx           # Điểm khởi chạy của React
+│       │   └── index.css          # Kiểu giao diện responsive và truy cập được
+│       ├── package.json           # Danh mục thư viện Frontend
+│       ├── .env.example           # Mẫu cấu hình URL Backend cho Frontend
+│       └── .env                  # Cấu hình cục bộ (không commit Git)
 │
 ├── .gitignore                     # Bảo vệ thông tin bí mật, loại bỏ .env và node_modules
 └── README.md                      # Tài liệu hướng dẫn này
@@ -79,7 +77,7 @@ Mở một cửa sổ dòng lệnh (Terminal / PowerShell) **thứ hai**:
 
 ```powershell
 # Bước 1: Di chuyển vào thư mục frontend
-cd frontend
+cd backend/frontend
 
 # Bước 2: Khởi chạy máy chủ phát triển Vite
 npm run dev -- --host 0.0.0.0
@@ -112,6 +110,10 @@ npm run dev -- --host 0.0.0.0
 
 Backend có các adapter OpenAI và Gemini cùng endpoint `POST /api/v1/scam-analysis`. Mỗi yêu cầu sử dụng đúng một nhà cung cấp: Gemini là chính; OpenAI chỉ là fallback tùy chọn nếu Gemini chưa cấu hình. OpenAI không bắt buộc khi dùng Gemini, và lỗi Gemini không tự động gửi dữ liệu sang OpenAI. Nội dung chỉ được gửi tới nhà cung cấp khi người dùng tích chọn đồng ý trên giao diện; một số thông tin liên hệ/bí mật phổ biến được che trước khi gửi.
 
-AI được tắt mặc định (`AI_ENABLED=False`); khi tắt, không có lời gọi nhà cung cấp nào được tạo. Mặc định Gemini dùng model `gemini-3.5-flash-lite`; `gemini-2.5-flash` đã deprecated. Để bật Gemini sau này, cung cấp `GEMINI_API_KEY` cho tiến trình backend qua GitHub Codespaces Secret cùng tên, không cấu hình `OPENAI_API_KEY`, đặt `AI_ENABLED=True` chỉ trong backend development rồi khởi động lại backend. Không đưa API key vào frontend, `VITE_*`, hoặc commit file `.env`. Nếu chưa đồng ý, chưa bật AI, thiếu cấu hình hoặc nhà cung cấp lỗi/quá thời gian, API trả trạng thái `INSUFFICIENT_DATA` thay vì tạo kết quả giả. Endpoint giới hạn nội dung tối đa 12.000 ký tự, bối cảnh tối đa 4.000 ký tự và có giới hạn tổng đầu vào, timeout cùng giới hạn số yêu cầu đồng thời. Quota và billing phụ thuộc project/tier trong Google AI Studio; cần kiểm tra ở đó trước khi dùng, không thể suy ra từ việc API key tồn tại.
+AI được tắt mặc định (`AI_ENABLED=False`); khi tắt, không có lời gọi nhà cung cấp nào được tạo. Mặc định Gemini dùng model `gemini-3.5-flash-lite`; `gemini-2.5-flash` đã deprecated. Để bật Gemini, cung cấp `GEMINI_API_KEY` cho tiến trình backend qua secret của môi trường triển khai; không cấu hình `OPENAI_API_KEY` nếu không chủ động dùng OpenAI. Không đưa API key vào frontend, `VITE_*`, hoặc commit file `.env`. Khi chưa đồng ý, API trả `analysis_status=NOT_ANALYZED`. Khi AI chưa được cấu hình hoặc gặp lỗi/quá thời gian, API không tạo kết quả giả: phản hồi văn bản có `analysis_status=FAILED` và `risk_level=INSUFFICIENT_DATA`; frontend hiển thị lỗi dịch vụ riêng, không coi đó là kết luận phân tích.
 
-Giao diện yêu cầu đồng ý rõ ràng trước khi gửi tin nhắn, ảnh hoặc âm thanh đến dịch vụ AI. `POST /api/v1/scam-analysis/image` nhận raw body với `Content-Type` là `image/jpeg`, `image/png` hoặc `image/webp`, giới hạn 10 MiB và kiểm tra chữ ký tệp trước khi gửi ảnh cho Gemini Vision. `POST /api/v1/scam-analysis/audio` nhận raw body với `Content-Type` là `audio/mpeg`, `audio/wav` hoặc `audio/mp4`, giới hạn 20 MiB và kiểm tra chữ ký trước khi gửi MP3, WAV hoặc M4A cho Gemini để phiên âm tiếng Việt và phân tích. Ảnh và âm thanh chỉ được giữ tạm trong bộ nhớ, không được ghi log hoặc lưu trữ bởi ứng dụng; bản phiên âm không được trả về. Kết quả âm thanh chỉ hiện mức nguy cơ cho đến khi người dùng mở phần giải thích. Nếu Gemini chưa cấu hình hoặc không khả dụng, endpoint ảnh/âm thanh trả lỗi HTTP thay vì tạo kết quả giả. Phần phân tích văn bản tiếp tục dùng `POST /api/v1/scam-analysis`; không tự retry hoặc gửi chéo sang nhà cung cấp thứ hai. Endpoint kiểm tra URL hiện tại chỉ kiểm tra tín hiệu cơ bản, không tải website. Kết quả AI không xác minh danh tính, thương hiệu hay website; phần trăm độ tin cậy chưa được hiệu chuẩn nên không được trả về.
+Backend tự động thử lại tối đa một lần khi gặp timeout, lỗi kết nối hoặc một số mã HTTP upstream tạm thời. Lỗi cấu trúc phản hồi, lỗi xác thực và phản hồi 429 do quota/rate limit không được tự động thử lại. Ngân sách thời gian cho các lần gọi provider tối đa 55 giây. Frontend thử lại tối đa một lần khi nhận phản hồi gateway 502/503 không phải JSON; phản hồi JSON từ API ứng dụng không được frontend tự thử lại. HTTP 504 không tự động thử lại để tránh gửi trùng khi yêu cầu trước có thể vẫn đang chạy. Nếu dịch vụ vẫn không phản hồi, người dùng có thể thử lại thủ công trên cùng trang với nội dung đã nhập được giữ nguyên. Giới hạn nội dung, timeout và số yêu cầu đồng thời được cấu hình qua biến môi trường backend. Quota và billing phụ thuộc project/tier trong Google AI Studio.
+
+Giao diện yêu cầu đồng ý rõ ràng trước khi gửi tin nhắn, ảnh hoặc âm thanh đến dịch vụ AI. `POST /api/v1/scam-analysis/image` nhận raw body với `Content-Type` là `image/jpeg`, `image/png` hoặc `image/webp`, giới hạn 10 MiB và kiểm tra chữ ký tệp trước khi gửi ảnh cho Gemini Vision. `POST /api/v1/scam-analysis/audio` nhận raw body với `Content-Type` là `audio/mpeg`, `audio/wav` hoặc `audio/mp4`, giới hạn 20 MiB và kiểm tra chữ ký trước khi gửi MP3, WAV hoặc M4A cho Gemini để phiên âm tiếng Việt và phân tích. Ảnh và âm thanh chỉ được giữ tạm trong bộ nhớ, không được ghi log hoặc lưu trữ bởi ứng dụng; bản phiên âm không được trả về. Nếu Gemini chưa cấu hình hoặc không khả dụng, endpoint ảnh/âm thanh báo lỗi dịch vụ thay vì tạo kết quả giả. Phần phân tích văn bản tiếp tục dùng `POST /api/v1/scam-analysis`; không gửi chéo sang nhà cung cấp thứ hai. Endpoint kiểm tra URL hiện tại chỉ kiểm tra tín hiệu cơ bản, không tải website. Kết quả AI không xác minh danh tính, thương hiệu hay website; phần trăm độ tin cậy chưa được hiệu chuẩn nên không được trả về.
+
+Repository hiện không có `render.yaml`, Dockerfile hoặc thiết lập triển khai Render được kiểm soát phiên bản. Vì vậy, chưa thể xác nhận cấu hình cold start, health-check path, start command, sleep/instance plan hoặc giới hạn request của dịch vụ Render đang chạy; cần kiểm tra trực tiếp trong Render Dashboard. Health check API là `GET /api/v1/health`. Frontend chờ tối đa 70 giây; timeout của gateway bên ngoài cần dài hơn mức này hoặc được điều chỉnh đồng bộ trong cấu hình triển khai.

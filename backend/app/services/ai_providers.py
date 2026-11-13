@@ -4,19 +4,22 @@ import base64
 import json
 import logging
 from pydantic import ValidationError
-from typing import Protocol
+from typing import Protocol, TypeVar
 from urllib.parse import quote, urlparse
 
 import httpx
 
 from app.core.config import Settings
 from app.schemas.scam_analysis import (
+    AnalysisFailureReason,
     AudioModelAnalysisOutput,
     ImageModelAnalysisOutput,
     ModelAnalysisOutput,
 )
 
 AUDIO_MAX_OUTPUT_TOKENS = 4000
+TRANSIENT_HTTP_STATUS_CODES = {408, 425, 500, 502, 503, 504}
+ModelOutput = TypeVar("ModelOutput", bound=ModelAnalysisOutput)
 
 
 class AIAnalysisProvider(Protocol):
@@ -47,9 +50,17 @@ class AIAudioAnalysisProvider(Protocol):
 class AIProviderError(Exception):
     """Raised when an upstream AI provider fails or returns invalid data."""
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        failure_reason: AnalysisFailureReason = AnalysisFailureReason.AI_UNAVAILABLE,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.failure_reason = failure_reason
+        self.retryable = retryable
 
 
 class BaseHTTPProvider:
@@ -76,16 +87,38 @@ class BaseHTTPProvider:
                 response = await client.post(url, headers=headers, json=body)
             response.raise_for_status()
             payload = response.json()
+        except httpx.TimeoutException as error:
+            raise AIProviderError(
+                "Nhà cung cấp AI hết thời gian chờ",
+                failure_reason=AnalysisFailureReason.TIMEOUT,
+                retryable=True,
+            ) from error
         except httpx.HTTPStatusError as error:
             status_code = error.response.status_code
             raise AIProviderError(
                 f"Nhà cung cấp AI trả về HTTP {status_code}",
                 status_code=status_code,
+                failure_reason=AnalysisFailureReason.HTTP_ERROR,
+                retryable=status_code in TRANSIENT_HTTP_STATUS_CODES,
             ) from error
-        except (httpx.HTTPError, ValueError) as error:
+        except httpx.NetworkError as error:
+            raise AIProviderError(
+                "Không thể kết nối với nhà cung cấp AI",
+                failure_reason=AnalysisFailureReason.AI_UNAVAILABLE,
+                retryable=True,
+            ) from error
+        except httpx.HTTPError as error:
             raise AIProviderError("Nhà cung cấp AI không khả dụng") from error
+        except ValueError as error:
+            raise AIProviderError(
+                "Nhà cung cấp AI trả về JSON không hợp lệ",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            ) from error
         if not isinstance(payload, dict):
-            raise ValueError("Nhà cung cấp AI trả về JSON không hợp lệ")
+            raise AIProviderError(
+                "Nhà cung cấp AI trả về JSON không hợp lệ",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
         return payload
 
     @staticmethod
@@ -99,7 +132,7 @@ class BaseHTTPProvider:
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("URL API AI phải là HTTPS hợp lệ")
+            raise AIProviderError("URL API AI không hợp lệ")
 
     @staticmethod
     def _system_instruction() -> str:
@@ -153,6 +186,67 @@ class OpenAIProvider(BaseHTTPProvider):
 class GeminiProvider(BaseHTTPProvider):
     name = "gemini"
 
+    @staticmethod
+    def _candidate_text(payload: dict[str, object]) -> str:
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise AIProviderError(
+                "Gemini không trả về candidate hợp lệ",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
+        candidate = candidates[0]
+        if not isinstance(candidate, dict):
+            raise AIProviderError(
+                "Gemini không trả về candidate hợp lệ",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
+        if candidate.get("finishReason") == "MAX_TOKENS":
+            raise AIProviderError(
+                "Gemini response reached the token limit",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
+
+        content = candidate.get("content")
+        parts = content.get("parts") if isinstance(content, dict) else None
+        if not isinstance(parts, list):
+            raise AIProviderError(
+                "Gemini không trả về nội dung phân tích",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
+        text_parts = [
+            part["text"]
+            for part in parts
+            if isinstance(part, dict)
+            and part.get("thought") is not True
+            and isinstance(part.get("text"), str)
+        ]
+        if not text_parts:
+            raise AIProviderError(
+                "Gemini không trả về nội dung phân tích",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
+        return "".join(text_parts)
+
+    @staticmethod
+    def _validate_response(
+        response_content: str,
+        output_type: type[ModelOutput],
+    ) -> ModelOutput:
+        try:
+            return output_type.model_validate_json(response_content)
+        except ValidationError as error:
+            logger = logging.getLogger(__name__)
+            for issue in error.errors(include_input=False):
+                logger.warning(
+                    "Gemini schema validation: field=%s, type=%s",
+                    ".".join(str(part) for part in issue["loc"]),
+                    issue["type"],
+                )
+            raise AIProviderError(
+                "Gemini returned an invalid structured response",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            ) from error
+
     async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
         self._validate_base_url(self.configuration.GEMINI_BASE_URL)
         model = quote(self.configuration.GEMINI_MODEL, safe="-")
@@ -182,19 +276,10 @@ class GeminiProvider(BaseHTTPProvider):
                 },
             },
         )
-        
-        logger = logging.getLogger(__name__)
-        candidate = payload["candidates"][0]
-        logger.info(
-            "Gemini audio finish_reason=%s, output_tokens=%s",
-            candidate.get("finishReason", "UNKNOWN"),
-            payload.get("usageMetadata", {}).get("candidatesTokenCount", "UNKNOWN"),
+        return self._validate_response(
+            self._candidate_text(payload),
+            ModelAnalysisOutput,
         )
-
-        response_content = payload["candidates"][0]["content"]["parts"][0]["text"]
-        if not isinstance(response_content, str):
-            raise ValueError("Gemini trả về nội dung không hợp lệ")
-        return ModelAnalysisOutput.model_validate_json(response_content)
 
     async def analyze_image(
         self, image: bytes, mime_type: str
@@ -240,10 +325,10 @@ class GeminiProvider(BaseHTTPProvider):
                 },
             },
         )
-        response_content = payload["candidates"][0]["content"]["parts"][0]["text"]
-        if not isinstance(response_content, str):
-            raise ValueError("Gemini trả về nội dung hình ảnh không hợp lệ")
-        return ImageModelAnalysisOutput.model_validate_json(response_content)
+        return self._validate_response(
+            self._candidate_text(payload),
+            ImageModelAnalysisOutput,
+        )
 
     async def analyze_audio(
         self, audio: bytes, mime_type: str
@@ -288,13 +373,9 @@ class GeminiProvider(BaseHTTPProvider):
                 "responseMimeType": "application/json",
             },
         }
-        try:
-            payload = await self._post_json(request_url, headers, body)
-        except AIProviderError as error:
-            if error.status_code != 503:
-                raise
-            payload = await self._post_json(request_url, headers, body)
+        payload = await self._post_json(request_url, headers, body)
 
+        response_content = self._candidate_text(payload)
         candidate = payload["candidates"][0]
         finish_reason = candidate.get("finishReason", "UNKNOWN")
         if (
@@ -318,21 +399,13 @@ class GeminiProvider(BaseHTTPProvider):
             output_tokens,
         )
         if finish_reason == "MAX_TOKENS":
-            raise AIProviderError("Gemini audio response reached the token limit")
+            raise AIProviderError(
+                "Gemini audio response reached the token limit",
+                failure_reason=AnalysisFailureReason.INVALID_RESPONSE,
+            )
 
-        response_content = candidate["content"]["parts"][0]["text"]
-        if not isinstance(response_content, str):
-            raise ValueError("Gemini trả về nội dung âm thanh không hợp lệ")
-
-        try:
-            return AudioModelAnalysisOutput.model_validate_json(response_content)
-        except ValidationError as error:
-            logger = logging.getLogger(__name__)
-            for issue in error.errors(include_input=False):
-                logger.error(
-                    "Gemini audio schema validation: field=%s, type=%s",
-                    ".".join(str(part) for part in issue["loc"]),
-                    issue["type"],
-                )
-            raise
+        return self._validate_response(
+            response_content,
+            AudioModelAnalysisOutput,
+        )
 
