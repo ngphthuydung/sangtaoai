@@ -9,6 +9,7 @@ from typing import TypeVar
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
+from app.core.request_diagnostics import record_provider_failure, record_retry
 from app.schemas.scam_analysis import (
     AnalysisFailureReason,
     AnalysisStatus,
@@ -46,6 +47,25 @@ class ImageAnalysisUnavailable(Exception):
 
 class AudioAnalysisUnavailable(Exception):
     """Raised when Gemini cannot provide an audio analysis."""
+
+
+def _record_provider_error(error: Exception) -> None:
+    if isinstance(error, AIProviderError):
+        if error.status_code is not None:
+            category = "provider_http_error"
+        elif error.failure_reason == AnalysisFailureReason.TIMEOUT:
+            category = "provider_timeout"
+        elif error.failure_reason == AnalysisFailureReason.INVALID_RESPONSE:
+            category = "invalid_provider_response"
+        else:
+            category = "provider_connection_error"
+        record_provider_failure(category, error.status_code)
+    elif isinstance(error, TimeoutError):
+        record_provider_failure("provider_timeout")
+    elif isinstance(error, (ValueError, KeyError, IndexError, TypeError, ValidationError)):
+        record_provider_failure("invalid_provider_response")
+    else:
+        record_provider_failure("provider_error")
 
 
 class ScamAnalysisService:
@@ -104,11 +124,13 @@ class ScamAnalysisService:
                 retryable = True
 
             if not retryable or attempt + 1 == AI_RETRY_ATTEMPTS:
+                _record_provider_error(last_error)
                 raise last_error
 
             remaining = deadline - loop.time()
             if remaining <= AI_RETRY_DELAY_SECONDS:
                 break
+            record_retry()
             logger.info(
                 "%s transient failure (reason=%s, status=%s); retrying once",
                 provider_name,
@@ -118,6 +140,7 @@ class ScamAnalysisService:
             await asyncio.sleep(AI_RETRY_DELAY_SECONDS)
 
         if last_error is not None:
+            _record_provider_error(last_error)
             raise last_error
         raise AIProviderError(
             "AI provider request exceeded its time budget",
@@ -155,6 +178,7 @@ class ScamAnalysisService:
                     timeout=AI_TOTAL_TIMEOUT_CAP_SECONDS + 1,
                 )
             except AIProviderError as error:
+                _record_provider_error(error)
                 logger.warning(
                     "%s analysis failed (failure_reason=%s, provider_status=%s, error=%s)",
                     primary_provider.name,
@@ -167,6 +191,7 @@ class ScamAnalysisService:
                     error.failure_reason,
                 )
             except TimeoutError as error:
+                record_provider_failure("provider_timeout")
                 logger.warning(
                     "%s analysis failed (failure_reason=%s, error=%s)",
                     primary_provider.name,
@@ -178,6 +203,7 @@ class ScamAnalysisService:
                     AnalysisFailureReason.TIMEOUT,
                 )
             except (ValueError, KeyError, IndexError, TypeError, ValidationError) as error:
+                record_provider_failure("invalid_provider_response")
                 logger.warning(
                     "%s analysis failed (failure_reason=%s, error=%s)",
                     primary_provider.name,
@@ -231,6 +257,7 @@ class ScamAnalysisService:
             TypeError,
             ValidationError,
         ) as error:
+            _record_provider_error(error)
             logger.warning(
                 "Gemini image analysis failed (provider_status=%s, error=%s)",
                 error.status_code if isinstance(error, AIProviderError) else None,
@@ -280,6 +307,7 @@ class ScamAnalysisService:
             TypeError,
             ValidationError,
         ) as error:
+            _record_provider_error(error)
             logger.warning(
                 "Gemini audio analysis failed (provider_status=%s, error=%s)",
                 error.status_code if isinstance(error, AIProviderError) else None,

@@ -1,5 +1,9 @@
 """API tests for scam analysis with an injected, non-network provider."""
 
+from io import BytesIO
+import wave
+
+from PIL import Image
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,7 +19,26 @@ from app.schemas.scam_analysis import (
     RiskLevel,
 )
 from app.services.ai_providers import AIProviderError
+from app.services.media_validation import validate_image
 from app.services.scam_analysis import ScamAnalysisService
+
+MP3_FIXTURE = b"ID3\x04\x00\x00\x00\x00\x00\x00\xff\xfb\x90\x64audio"
+
+
+def image_fixture(image_format: str) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (4, 3), color=(20, 40, 60)).save(output, format=image_format)
+    return output.getvalue()
+
+
+def wav_fixture() -> bytes:
+    output = BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(16000)
+        target.writeframes(b"\x00\x00" * 160)
+    return output.getvalue()
 
 
 class MockGeminiProvider:
@@ -107,8 +130,8 @@ def install_analysis_service(monkeypatch, service: ScamAnalysisService) -> None:
 @pytest.mark.parametrize(
     ("mime_type", "audio"),
     [
-        ("audio/mpeg", b"ID3mock-mp3"),
-        ("audio/wav", b"RIFF\x04\x00\x00\x00WAVEmock"),
+        ("audio/mpeg", MP3_FIXTURE),
+        ("audio/wav", wav_fixture()),
         ("audio/mp4", b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00"),
     ],
 )
@@ -140,7 +163,7 @@ def test_audio_endpoint_requires_consent_before_provider_call(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scam-analysis/audio",
-            content=b"ID3mock-mp3",
+            content=MP3_FIXTURE,
             headers={"content-type": "audio/mpeg"},
         )
 
@@ -178,7 +201,7 @@ def test_audio_endpoint_rejects_oversized_body_before_analysis(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scam-analysis/audio?allow_external_processing=true",
-            content=b"ID3",
+            content=MP3_FIXTURE,
             headers={
                 "content-type": "audio/mpeg",
                 "content-length": str(MAX_AUDIO_SIZE_BYTES + 1),
@@ -198,7 +221,7 @@ def test_audio_endpoint_reports_gemini_unavailable_without_fake_result(monkeypat
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scam-analysis/audio?allow_external_processing=true",
-            content=b"ID3mock-mp3",
+            content=MP3_FIXTURE,
             headers={"content-type": "audio/mpeg"},
         )
 
@@ -228,13 +251,94 @@ def test_audio_endpoint_reports_provider_failure_without_logging_audio(
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scam-analysis/audio?allow_external_processing=true",
-            content=b"ID3mock-mp3",
+            content=MP3_FIXTURE,
             headers={"content-type": "audio/mpeg"},
         )
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Không thể phân tích do dịch vụ AI gặp sự cố."
     assert "0912345678" not in caplog.text
+
+
+def test_audio_endpoint_rejects_id3_without_audio_frames(monkeypatch):
+    provider = MockAudioGeminiProvider()
+    install_analysis_service(monkeypatch, audio_service(provider))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis/audio?allow_external_processing=true",
+            content=b"ID3\x04\x00\x00\x00\x00\x00\x00no-frames",
+            headers={"content-type": "audio/mpeg"},
+        )
+
+    assert response.status_code == 415
+    assert response.json()["detail"].startswith("Tệp âm thanh bị lỗi")
+    assert provider.calls == []
+
+
+def test_media_failure_returns_safe_request_diagnostics(monkeypatch, caplog):
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(configuration=Settings(AI_ENABLED=False)),
+    )
+    private_marker = "PRIVATE_MEDIA_CONTENT"
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis/audio?allow_external_processing=true",
+            content=MP3_FIXTURE + private_marker.encode(),
+            headers={"content-type": "audio/mpeg"},
+        )
+
+    assert response.status_code == 503
+    assert response.headers["x-request-id"]
+    assert response.headers["x-processing-stage"] == "provider_analysis"
+    assert response.headers["x-error-category"] == "provider_unavailable"
+    assert response.headers["x-processing-duration-ms"].isdigit()
+    assert response.headers["x-ai-retry-count"] == "0"
+    assert private_marker not in caplog.text
+
+
+def test_transient_retry_count_is_exposed_in_request_diagnostics(monkeypatch):
+    class RetryOnceProvider:
+        name = "gemini"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def analyze(self, content: str, context: str | None) -> ModelAnalysisOutput:
+            self.calls += 1
+            if self.calls == 1:
+                raise AIProviderError(
+                    "temporary upstream failure",
+                    status_code=503,
+                    failure_reason=AnalysisFailureReason.HTTP_ERROR,
+                    retryable=True,
+                )
+            return await MockGeminiProvider().analyze(content, context)
+
+    provider = RetryOnceProvider()
+    install_analysis_service(
+        monkeypatch,
+        ScamAnalysisService(gemini_provider=provider),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis",
+            json={
+                "content": "Gửi mã OTP cho tôi",
+                "allow_external_processing": True,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"]
+    assert response.headers["x-processing-stage"] == "provider_analysis"
+    assert response.headers["x-ai-retry-count"] == "1"
+    assert provider.calls == 2
+
+
 def test_scam_analysis_endpoint_requires_consent_before_provider_call(monkeypatch):
     provider = MockGeminiProvider()
     service = ScamAnalysisService(
@@ -414,12 +518,36 @@ def test_image_endpoint_rejects_oversized_body_before_analysis(monkeypatch):
     assert provider.calls == []
 
 
+def test_image_endpoint_rejects_truncated_image_even_with_valid_signature(monkeypatch):
+    provider = MockImageGeminiProvider()
+    install_analysis_service(monkeypatch, ScamAnalysisService(image_provider=provider))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/scam-analysis/image?allow_external_processing=true",
+            content=b"\xff\xd8\xff" + b"not-a-complete-jpeg",
+            headers={"content-type": "image/jpeg"},
+        )
+
+    assert response.status_code == 415
+    assert "Ảnh bị lỗi" in response.json()["detail"]
+    assert provider.calls == []
+
+
+def test_image_validation_decodes_image_and_returns_dimensions():
+    image = image_fixture("PNG")
+
+    assert validate_image(image, "image/png") == (4, 3)
+    with pytest.raises(ValueError):
+        validate_image(image, "image/jpeg")
+
+
 @pytest.mark.parametrize(
     ("mime_type", "image"),
     [
-        ("image/jpeg", b"\xff\xd8\xff\xdbJPEG"),
-        ("image/png", b"\x89PNG\r\n\x1a\nPNG"),
-        ("image/webp", b"RIFF\x04\x00\x00\x00WEBP"),
+        ("image/jpeg", image_fixture("JPEG")),
+        ("image/png", image_fixture("PNG")),
+        ("image/webp", image_fixture("WEBP")),
     ],
 )
 def test_image_endpoint_returns_gemini_analysis(monkeypatch, mime_type, image):
@@ -456,7 +584,7 @@ def test_image_endpoint_reports_gemini_unavailable_without_fake_result(monkeypat
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/scam-analysis/image?allow_external_processing=true",
-            content=b"\x89PNG\r\n\x1a\nimage",
+            content=image_fixture("PNG"),
             headers={"content-type": "image/png"},
         )
 

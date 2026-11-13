@@ -18,7 +18,7 @@ from app.schemas.scam_analysis import (
 )
 
 AUDIO_MAX_OUTPUT_TOKENS = 4000
-TRANSIENT_HTTP_STATUS_CODES = {408, 425, 500, 502, 503, 504}
+TRANSIENT_HTTP_STATUS_CODES = {408, 425, 500, 502, 503}
 ModelOutput = TypeVar("ModelOutput", bound=ModelAnalysisOutput)
 
 
@@ -87,11 +87,16 @@ class BaseHTTPProvider:
                 response = await client.post(url, headers=headers, json=body)
             response.raise_for_status()
             payload = response.json()
-        except httpx.TimeoutException as error:
+        except httpx.ConnectTimeout as error:
             raise AIProviderError(
                 "Nhà cung cấp AI hết thời gian chờ",
                 failure_reason=AnalysisFailureReason.TIMEOUT,
                 retryable=True,
+            ) from error
+        except httpx.TimeoutException as error:
+            raise AIProviderError(
+                "Nhà cung cấp AI hết thời gian chờ",
+                failure_reason=AnalysisFailureReason.TIMEOUT,
             ) from error
         except httpx.HTTPStatusError as error:
             status_code = error.response.status_code
@@ -101,11 +106,16 @@ class BaseHTTPProvider:
                 failure_reason=AnalysisFailureReason.HTTP_ERROR,
                 retryable=status_code in TRANSIENT_HTTP_STATUS_CODES,
             ) from error
-        except httpx.NetworkError as error:
+        except httpx.ConnectError as error:
             raise AIProviderError(
                 "Không thể kết nối với nhà cung cấp AI",
                 failure_reason=AnalysisFailureReason.AI_UNAVAILABLE,
                 retryable=True,
+            ) from error
+        except httpx.NetworkError as error:
+            raise AIProviderError(
+                "Kết nối với nhà cung cấp AI bị gián đoạn",
+                failure_reason=AnalysisFailureReason.AI_UNAVAILABLE,
             ) from error
         except httpx.HTTPError as error:
             raise AIProviderError("Nhà cung cấp AI không khả dụng") from error
