@@ -180,6 +180,15 @@ class GeminiProvider(BaseHTTPProvider):
                 },
             },
         )
+        
+        logger = logging.getLogger(__name__)
+        candidate = payload["candidates"][0]
+        logger.info(
+            "Gemini audio finish_reason=%s, output_tokens=%s",
+            candidate.get("finishReason", "UNKNOWN"),
+            payload.get("usageMetadata", {}).get("candidatesTokenCount", "UNKNOWN"),
+        )
+
         response_content = payload["candidates"][0]["content"]["parts"][0]["text"]
         if not isinstance(response_content, str):
             raise ValueError("Gemini trả về nội dung không hợp lệ")
