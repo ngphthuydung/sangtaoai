@@ -22,6 +22,7 @@ from app.schemas.scam_analysis import (
     RiskLevel,
     ScamAnalysisRequest,
     ScamAnalysisResponse,
+    TranscriptionStatus,
 )
 from app.services.ai_providers import (
     AIAnalysisProvider,
@@ -322,6 +323,42 @@ class ScamAnalysisService:
             provider.name,
             output.transcript,
         )
+        transcription_status = output.transcription_status or (
+            TranscriptionStatus.COMPLETED
+            if output.transcript.strip()
+            else TranscriptionStatus.FAILED
+        )
+        if transcription_status == TranscriptionStatus.FAILED:
+            return self._response(
+                RiskLevel.INSUFFICIENT_DATA,
+                "Không nghe rõ lời nói để phân tích. Đây không phải kết luận an toàn.",
+                [],
+                [
+                    "Hãy thử gửi bản ghi âm rõ hơn hoặc chép lại nội dung để kiểm tra.",
+                    "Chưa cung cấp mật khẩu, mã OTP hoặc thông tin tài chính.",
+                ],
+                [],
+                CrossCheckStatus.NOT_REQUESTED,
+                "Không thể nhận dạng lời nói trong bản ghi.",
+                AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
+            ).model_copy(update={"transcription_status": transcription_status})
+        if (
+            transcription_status == TranscriptionStatus.PARTIAL
+            and not assessment.findings
+        ):
+            return self._response(
+                RiskLevel.INSUFFICIENT_DATA,
+                "Chỉ nghe rõ một phần bản ghi; chưa đủ căn cứ để đánh giá toàn bộ nội dung.",
+                [],
+                [
+                    "Hãy gửi lại bản ghi rõ hơn hoặc chép lại phần lời nói cần kiểm tra.",
+                    "Chưa cung cấp mật khẩu, mã OTP hoặc thông tin tài chính.",
+                ],
+                [],
+                CrossCheckStatus.NOT_REQUESTED,
+                "Bản ghi chỉ được nghe rõ một phần.",
+                AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
+            ).model_copy(update={"transcription_status": transcription_status})
         invalid = self._has_unusable_high_risk_evidence(output, assessment)
         result = self._primary_result(
             output,
@@ -331,7 +368,16 @@ class ScamAnalysisService:
             "Âm thanh được phiên âm và phân tích bằng Gemini.",
             AnalysisMethod.GEMINI_CONTEXTUAL_ANALYSIS,
         )
-        return _redact_analysis_result(result)
+        if transcription_status == TranscriptionStatus.PARTIAL:
+            result = result.model_copy(
+                update={
+                    "summary": result.summary
+                    + " Bản ghi chỉ nghe rõ một phần; phần còn lại chưa được đánh giá."
+                }
+            )
+        return _redact_analysis_result(
+            result.model_copy(update={"transcription_status": transcription_status})
+        )
 
     def _configured_openai(self) -> AIAnalysisProvider | None:
         if not self.configuration.AI_ENABLED or not self.configuration.OPENAI_API_KEY:
@@ -367,13 +413,55 @@ class ScamAnalysisService:
         cross_check_summary: str,
         analysis_method: AnalysisMethod,
     ) -> ScamAnalysisResponse:
-        risk = output.risk_level
-        summary = output.summary
-        if invalid:
-            risk = RiskLevel.SUSPICIOUS if assessment.findings else RiskLevel.INSUFFICIENT_DATA
-            summary = "Một phần kết quả không có bằng chứng trích dẫn hợp lệ; cần kiểm chứng độc lập."
+        finding_types = {finding.type for finding in assessment.findings}
+        high_risk_combination = (
+            "AUTHORITY_IMPERSONATION" in finding_types
+            and "UNUSUAL_PAYMENT_REQUEST" in finding_types
+            and bool(
+                finding_types
+                & {"THREATENED_CONSEQUENCES", "URGENCY_PRESSURE"}
+            )
+        )
+        if "CREDENTIAL_OTP_THEFT" in finding_types or high_risk_combination:
+            risk = RiskLevel.HIGH_RISK
+        elif assessment.findings:
+            risk = RiskLevel.SUSPICIOUS
+        elif output.risk_level == RiskLevel.LOW_RISK and not invalid:
+            risk = RiskLevel.LOW_RISK
+        else:
+            risk = RiskLevel.INSUFFICIENT_DATA
+
+        if risk == RiskLevel.HIGH_RISK:
+            finding = next(
+                (
+                    item
+                    for item in assessment.findings
+                    if item.type == "CREDENTIAL_OTP_THEFT"
+                ),
+                assessment.findings[0],
+            )
+            summary = (
+                f"Có dấu hiệu nguy cơ cao: {finding.name_vi}. "
+                f"Nội dung trích dẫn: “{finding.evidence}”"
+            )
+        elif risk == RiskLevel.SUSPICIOUS:
+            finding = assessment.findings[0]
+            summary = (
+                f"Có dấu hiệu cần kiểm tra: {finding.name_vi}. "
+                f"Nội dung trích dẫn: “{finding.evidence}”"
+            )
         elif risk == RiskLevel.LOW_RISK:
-            summary = summary.rstrip(". ") + ". Rủi ro thấp không đồng nghĩa đã xác minh an toàn."
+            summary = (
+                "Chưa thấy dấu hiệu đáng ngờ rõ ràng trong nội dung đã gửi. "
+                "Điều này không đồng nghĩa nội dung đã được xác minh an toàn."
+            )
+        elif invalid:
+            summary = (
+                "Chưa đủ bằng chứng cụ thể trong nội dung đã gửi để kết luận. "
+                "Một số trích dẫn do AI đưa ra không khớp nguyên văn."
+            )
+        else:
+            summary = "Chưa đủ bằng chứng cụ thể trong nội dung đã gửi để kết luận."
         return self._response(
             risk,
             summary,

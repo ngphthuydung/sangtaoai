@@ -31,6 +31,40 @@ class EvidenceAssessment:
 
 
 class EvidenceEngine:
+    @staticmethod
+    def _find_verbatim_excerpt(source: str, quote: str) -> str | None:
+        def compact(value: str) -> tuple[str, list[int], list[int]]:
+            characters: list[str] = []
+            starts: list[int] = []
+            ends: list[int] = []
+            whitespace_start: int | None = None
+            for index, character in enumerate(value):
+                if character.isspace():
+                    if whitespace_start is None:
+                        whitespace_start = index
+                    continue
+                if whitespace_start is not None:
+                    if characters:
+                        characters.append(" ")
+                        starts.append(whitespace_start)
+                        ends.append(index)
+                    whitespace_start = None
+                characters.append(character)
+                starts.append(index)
+                ends.append(index + 1)
+            return "".join(characters), starts, ends
+
+        source_text, source_starts, source_ends = compact(source)
+        quote_text, _, _ = compact(quote)
+        if not quote_text:
+            return None
+        location = source_text.find(quote_text)
+        if location < 0:
+            return None
+        start = source_starts[location]
+        end = source_ends[location + len(quote_text) - 1]
+        return source[start:end]
+
     def assess(
         self,
         output: ModelAnalysisOutput,
@@ -40,7 +74,8 @@ class EvidenceEngine:
         findings: list[DetectedBehavior] = []
         invalid_count = 0
         for finding in output.detected_behaviors:
-            if finding.evidence not in source_text:
+            excerpt = self._find_verbatim_excerpt(source_text, finding.evidence)
+            if excerpt is None:
                 invalid_count += 1
                 continue
             name_vi, description = BEHAVIOR_CATALOG.get(
@@ -52,8 +87,11 @@ class EvidenceEngine:
                     type=finding.type,
                     name_vi=name_vi,
                     description=description,
-                    evidence=finding.evidence,
-                    explanation=finding.explanation,
+                    evidence=excerpt,
+                    explanation=(
+                        "Dấu hiệu này dựa trên đoạn trích ở trên; danh tính người gửi "
+                        "và sự việc bên ngoài chưa được xác minh."
+                    ),
                     supported_by=[provider_name],
                 )
             )

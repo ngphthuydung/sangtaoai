@@ -18,6 +18,7 @@ from app.schemas.scam_analysis import (
     ModelAnalysisOutput,
     RiskLevel,
     ScamAnalysisRequest,
+    TranscriptionStatus,
 )
 from app.services.ai_providers import AIProviderError, GeminiProvider, OpenAIProvider
 from app.services.evidence_engine import BEHAVIOR_CATALOG
@@ -429,7 +430,7 @@ def test_low_risk_gemini_result_does_not_spend_call_on_openai():
     assert result.cross_check_status == CrossCheckStatus.NOT_REQUESTED
     assert len(gemini.calls) == 1
     assert openai.calls == []
-    assert "không đồng nghĩa đã xác minh an toàn" in result.summary
+    assert "không đồng nghĩa nội dung đã được xác minh an toàn" in result.summary
 
 
 def test_unquoted_evidence_is_discarded_and_cannot_support_high_risk():
@@ -496,6 +497,281 @@ def test_insufficient_evidence_is_a_completed_analysis_not_an_ai_failure():
     assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
     assert result.analysis_status == AnalysisStatus.COMPLETED
     assert result.analysis_failure_reason is None
+
+
+@pytest.mark.parametrize(
+    ("content", "output", "expected_risk"),
+    [
+        (
+            "Ngân hàng ABC: Tài khoản bị khóa. Gửi mã OTP để xác minh.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "CREDENTIAL_OTP_THEFT",
+                        "name_vi": "Xin OTP",
+                        "description": "Yêu cầu mã bí mật.",
+                        "evidence": "Gửi mã OTP để xác minh.",
+                        "explanation": "Yêu cầu xác thực.",
+                    }
+                ],
+                recommendations=["Không gửi mã OTP."],
+            ),
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Đơn hàng đang chờ. Chuyển khoản phí giao hàng 25.000 đồng vào tài khoản này.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "UNUSUAL_PAYMENT_REQUEST",
+                        "name_vi": "Yêu cầu thanh toán",
+                        "description": "Yêu cầu chuyển tiền.",
+                        "evidence": "Chuyển khoản phí giao hàng 25.000 đồng vào tài khoản này.",
+                        "explanation": "Cần xác minh yêu cầu thanh toán.",
+                    }
+                ],
+                recommendations=["Kiểm tra đơn hàng qua ứng dụng giao hàng chính thức."],
+            ),
+            RiskLevel.SUSPICIOUS,
+        ),
+        (
+            "Ngân hàng thông báo lịch bảo trì vào Chủ nhật.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Thông báo bình thường.",
+                detected_behaviors=[],
+                recommendations=["Không cần làm gì."],
+            ),
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Thông báo: vui lòng xem lại thông tin.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[],
+                recommendations=["Xác minh người gửi nếu cần."],
+            ),
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+        (
+            "Công an yêu cầu chuyển tiền ngay, nếu không sẽ phong tỏa tài khoản.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "AUTHORITY_IMPERSONATION",
+                        "name_vi": "Giả danh công an",
+                        "description": "Tự nhận là cơ quan chức năng.",
+                        "evidence": "Công an yêu cầu",
+                        "explanation": "Tự nhận có thẩm quyền.",
+                    },
+                    {
+                        "type": "UNUSUAL_PAYMENT_REQUEST",
+                        "name_vi": "Yêu cầu chuyển tiền",
+                        "description": "Yêu cầu thanh toán.",
+                        "evidence": "chuyển tiền ngay",
+                        "explanation": "Yêu cầu chuyển tiền.",
+                    },
+                    {
+                        "type": "THREATENED_CONSEQUENCES",
+                        "name_vi": "Đe dọa hậu quả",
+                        "description": "Nêu hậu quả tiêu cực.",
+                        "evidence": "nếu không sẽ phong tỏa tài khoản",
+                        "explanation": "Dùng lời đe dọa.",
+                    },
+                ],
+                recommendations=["Không chuyển tiền; tự gọi số chính thức của cơ quan."],
+            ),
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Cơ hội đầu tư lợi nhuận cao, cam kết sinh lời mỗi ngày.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "REWARD_BAIT",
+                        "name_vi": "Lợi nhuận hấp dẫn",
+                        "description": "Hứa hẹn lợi ích.",
+                        "evidence": "cam kết sinh lời mỗi ngày",
+                        "explanation": "Lời hứa cần được kiểm chứng.",
+                    }
+                ],
+                recommendations=["Không chuyển tiền trước khi xác minh."],
+            ),
+            RiskLevel.SUSPICIOUS,
+        ),
+        (
+            "Chúc mừng bạn trúng thưởng. Nộp phí nhận quà trước hôm nay.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "REWARD_BAIT",
+                        "name_vi": "Thông báo trúng thưởng",
+                        "description": "Dùng phần thưởng để thúc đẩy hành động.",
+                        "evidence": "Nộp phí nhận quà trước hôm nay.",
+                        "explanation": "Cần xác minh yêu cầu nộp phí.",
+                    }
+                ],
+                recommendations=["Không nộp phí trước khi xác minh."],
+            ),
+            RiskLevel.SUSPICIOUS,
+        ),
+        (
+            "Tuyển cộng tác viên làm tại nhà. Nộp phí hồ sơ trước khi nhận việc.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "UNUSUAL_PAYMENT_REQUEST",
+                        "name_vi": "Yêu cầu nộp phí tuyển dụng",
+                        "description": "Yêu cầu thanh toán trước.",
+                        "evidence": "Nộp phí hồ sơ trước khi nhận việc.",
+                        "explanation": "Cần xác minh đơn vị tuyển dụng.",
+                    }
+                ],
+                recommendations=["Xác minh doanh nghiệp qua kênh độc lập."],
+            ),
+            RiskLevel.SUSPICIOUS,
+        ),
+        (
+            "Tin nhắn 1 - Người gửi: Tôi là công an.\n"
+            "Tin nhắn 2 - Người gửi: Chuyển tiền để xác minh ngay.",
+            ModelAnalysisOutput(
+                risk_level=RiskLevel.INSUFFICIENT_DATA,
+                summary="Chưa đủ căn cứ.",
+                detected_behaviors=[
+                    {
+                        "type": "AUTHORITY_IMPERSONATION",
+                        "name_vi": "Giả danh cơ quan",
+                        "description": "Tự nhận là cơ quan chức năng.",
+                        "evidence": "Tôi là công an. Tin nhắn 2 - Người gửi:",
+                        "explanation": "Mạo nhận cơ quan.",
+                    },
+                    {
+                        "type": "UNUSUAL_PAYMENT_REQUEST",
+                        "name_vi": "Yêu cầu chuyển tiền",
+                        "description": "Yêu cầu thanh toán.",
+                        "evidence": "Chuyển tiền để xác minh ngay.",
+                        "explanation": "Yêu cầu chuyển tiền.",
+                    },
+                ],
+                recommendations=["Không chuyển tiền; hãy xác minh qua kênh chính thức."],
+            ),
+            RiskLevel.SUSPICIOUS,
+        ),
+    ],
+)
+def test_mocked_representative_cases_use_verified_signals(
+    content, output, expected_risk
+):
+    provider = FakeProvider("gemini", output)
+    result = run(
+        ScamAnalysisService(
+            gemini_provider=provider,
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(
+                content=content,
+                allow_external_processing=True,
+            )
+        )
+    )
+
+    assert result.risk_level == expected_risk
+    if expected_risk in {RiskLevel.HIGH_RISK, RiskLevel.SUSPICIOUS}:
+        assert result.detected_behaviors
+        assert result.detected_behaviors[0].evidence in content
+        assert result.detected_behaviors[0].evidence in result.summary
+
+
+def test_model_citation_with_wrapped_lines_preserves_original_excerpt():
+    source = "Tin nhắn 1:\nGửi mã OTP\nđể xác minh."
+    output = model_output(
+        evidence="Gửi mã OTP để xác minh.",
+    )
+    assessment = ScamAnalysisService().evidence_engine.assess(
+        output,
+        "gemini",
+        source,
+    )
+
+    assert assessment.findings[0].evidence == "Gửi mã OTP\nđể xác minh."
+
+
+def test_audio_transcription_failure_is_not_reported_as_scam_evidence():
+    class UnclearAudioProvider:
+        name = "gemini"
+
+        async def analyze_audio(
+            self, audio: bytes, mime_type: str
+        ) -> AudioModelAnalysisOutput:
+            return AudioModelAnalysisOutput(
+                risk_level=RiskLevel.HIGH_RISK,
+                summary="Không nghe rõ.",
+                transcript="",
+                transcription_status=TranscriptionStatus.FAILED,
+                detected_behaviors=[
+                    {
+                        "type": "CREDENTIAL_OTP_THEFT",
+                        "name_vi": "Xin OTP",
+                        "description": "Yêu cầu mã.",
+                        "evidence": "Gửi mã OTP",
+                        "explanation": "Yêu cầu mã xác thực.",
+                    }
+                ],
+                recommendations=["Không cung cấp OTP."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            audio_provider=UnclearAudioProvider(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_audio(b"audio", "audio/mpeg")
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.transcription_status == TranscriptionStatus.FAILED
+    assert result.detected_behaviors == []
+    assert "không nghe rõ" in result.summary.lower()
+
+
+def test_partial_audio_without_verified_evidence_remains_unresolved():
+    class PartialAudioProvider:
+        name = "gemini"
+
+        async def analyze_audio(
+            self, audio: bytes, mime_type: str
+        ) -> AudioModelAnalysisOutput:
+            return AudioModelAnalysisOutput(
+                risk_level=RiskLevel.LOW_RISK,
+                summary="Chưa thấy dấu hiệu.",
+                transcript="Nghe được một vài từ.",
+                transcription_status=TranscriptionStatus.PARTIAL,
+                detected_behaviors=[],
+                recommendations=["Xác minh người gọi."],
+            )
+
+    result = run(
+        ScamAnalysisService(
+            audio_provider=PartialAudioProvider(),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze_audio(b"audio", "audio/mpeg")
+    )
+
+    assert result.risk_level == RiskLevel.INSUFFICIENT_DATA
+    assert result.transcription_status == TranscriptionStatus.PARTIAL
+    assert "đánh giá toàn bộ nội dung" in result.summary
 
 
 @pytest.mark.parametrize(
@@ -703,6 +979,34 @@ def test_gemini_provider_detects_text_output_token_limit():
     assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
 
 
+@pytest.mark.parametrize("finish_reason", ["SAFETY", "RECITATION", "OTHER"])
+def test_gemini_rejects_non_completed_candidate(finish_reason):
+    async def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": finish_reason,
+                        "content": {
+                            "parts": [{"text": model_output().model_dump_json()}]
+                        },
+                    }
+                ]
+            },
+        )
+
+    provider = GeminiProvider(
+        configured_settings(),
+        transport=httpx.MockTransport(respond),
+    )
+
+    with pytest.raises(AIProviderError) as error:
+        run(provider.analyze("Tin nhắn", None))
+
+    assert error.value.failure_reason == AnalysisFailureReason.INVALID_RESPONSE
+
+
 def test_gemini_provider_classifies_http_timeout():
     async def timeout(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("upstream timeout", request=request)
@@ -754,7 +1058,9 @@ def test_gemini_provider_sends_image_inline_and_validates_response():
     assert requests[0].headers["x-goog-api-key"] == "gemini-test-secret"
     assert inline_image["mimeType"] == "image/png"
     assert inline_image["data"] == base64.b64encode(image).decode("ascii")
+    assert body["generationConfig"]["maxOutputTokens"] == 2400
     assert "visible_text" in body["systemInstruction"]["parts"][0]["text"]
+    assert "thứ tự tin nhắn" in body["systemInstruction"]["parts"][0]["text"]
     assert result.visible_text == "Nhấn vào liên kết"
 
 
@@ -846,6 +1152,7 @@ def test_gemini_provider_sends_audio_inline_and_transcribes_with_mock_http(caplo
     assert inline_audio["data"] == base64.b64encode(audio).decode("ascii")
     assert body["generationConfig"]["maxOutputTokens"] == 4000
     assert "transcript" in body["systemInstruction"]["parts"][0]["text"]
+    assert "transcription_status" in body["systemInstruction"]["parts"][0]["text"]
     assert result.transcript == "Vui lòng cung cấp mã OTP."
     assert "finish_reason=STOP, output_tokens=42" in caplog.text
     assert "Vui lòng cung cấp mã OTP." not in caplog.text

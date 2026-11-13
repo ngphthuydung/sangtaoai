@@ -25,6 +25,12 @@ class AnalysisFailureReason(str, Enum):
     HTTP_ERROR = "HTTP_ERROR"
 
 
+class TranscriptionStatus(str, Enum):
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
 class BehaviorType(str, Enum):
     URGENCY_PRESSURE = "URGENCY_PRESSURE"
     AUTHORITY_IMPERSONATION = "AUTHORITY_IMPERSONATION"
@@ -96,6 +102,7 @@ class ScamAnalysisResponse(BaseModel):
     recommendations: list[str] = Field(max_length=7)
     analysis_status: AnalysisStatus = AnalysisStatus.COMPLETED
     analysis_failure_reason: AnalysisFailureReason | None = None
+    transcription_status: TranscriptionStatus | None = None
     unverified_information: list[str] = Field(default_factory=list, max_length=10)
     verification_status: VerificationStatus = VerificationStatus.NOT_VERIFIED
     cross_check_status: CrossCheckStatus = CrossCheckStatus.NOT_REQUESTED
@@ -130,3 +137,4 @@ class ImageModelAnalysisOutput(ModelAnalysisOutput):
 
 class AudioModelAnalysisOutput(ModelAnalysisOutput):
     transcript: str = Field(max_length=12000)
+    transcription_status: TranscriptionStatus | None = None

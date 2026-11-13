@@ -151,6 +151,7 @@ def test_audio_endpoint_returns_mocked_analysis_without_transcript(
     assert response.status_code == 200
     assert response.json()["risk_level"] == "HIGH_RISK"
     assert response.json()["detected_behaviors"][0]["evidence"] == "Gửi mã OTP cho tôi"
+    assert response.json()["transcription_status"] == "COMPLETED"
     assert provider.calls == [(audio, mime_type)]
     assert "transcript" not in response.json()
     assert "0912345678" not in response.text

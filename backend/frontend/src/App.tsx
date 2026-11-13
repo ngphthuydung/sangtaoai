@@ -28,6 +28,7 @@ interface AnalysisResult {
   analysis_status?: string;
   analysis_failure_reason?: string | null;
   analysis_method?: string;
+  transcription_status?: 'COMPLETED' | 'PARTIAL' | 'FAILED' | null;
 }
 
 interface RequestMetadata {
@@ -125,8 +126,8 @@ const informationContent: Record<
   settings: {
     title: 'Cài đặt',
     paragraphs: [
-      'Ứng dụng không lưu nội dung bạn nhập vào phần cài đặt. Bạn cần đồng ý mỗi lần gửi tin nhắn, hình ảnh hoặc âm thanh để phân tích.',
-      'Không có tùy chọn nào thay đổi việc xử lý dữ liệu ở màn hình này.',
+      'Mục cài đặt hiện chưa có tùy chọn bổ sung. Bạn cần đồng ý mỗi lần gửi tin nhắn, hình ảnh hoặc âm thanh để phân tích.',
+      'Cách xử lý dữ liệu không thay đổi tại mục này.',
     ],
   },
 };
@@ -192,7 +193,7 @@ async function getApiError(response: Response, fallback: string): Promise<string
     const body: { detail?: unknown } = await response.json();
     if (typeof body.detail === 'string' && body.detail.trim()) return body.detail;
   } catch {
-    // Gateway errors are handled separately; other responses use a safe fallback.
+    // Non-JSON responses use a safe fallback.
   }
   return `${fallback} (HTTP ${response.status}).`;
 }
@@ -246,7 +247,10 @@ function parseAnalysisResult(payload: unknown): AnalysisResult {
     !Array.isArray(data.detected_behaviors) ||
     !Array.isArray(data.recommendations) ||
     (data.analysis_status !== undefined &&
-      !['COMPLETED', 'NOT_ANALYZED', 'FAILED'].includes(String(data.analysis_status)))
+      !['COMPLETED', 'NOT_ANALYZED', 'FAILED'].includes(String(data.analysis_status))) ||
+    (data.transcription_status !== undefined &&
+      data.transcription_status !== null &&
+      !['COMPLETED', 'PARTIAL', 'FAILED'].includes(String(data.transcription_status)))
   ) {
     throw new RequestFailure(
       'Máy chủ trả về kết quả không đúng định dạng. Nội dung vẫn được giữ lại để thử lại.',
@@ -302,6 +306,10 @@ function parseAnalysisResult(payload: unknown): AnalysisResult {
         : null,
     analysis_method:
       typeof data.analysis_method === 'string' ? data.analysis_method : undefined,
+    transcription_status:
+      typeof data.transcription_status === 'string'
+        ? (data.transcription_status as AnalysisResult['transcription_status'])
+        : null,
   };
 }
 
@@ -704,6 +712,26 @@ export default function App() {
     combinedRisk === 'LOW_RISK'
       ? `${combinedRecommendation} Kết quả này không xác nhận an toàn.`
       : combinedRecommendation;
+  const strongestMediaSummary = completedMedia
+    .slice()
+    .sort((left, right) => {
+      const priority: Record<RiskLevel, number> = {
+        HIGH_RISK: 0,
+        SUSPICIOUS: 1,
+        INSUFFICIENT_DATA: 2,
+        LOW_RISK: 3,
+      };
+      return priority[left.result.risk_level] - priority[right.result.risk_level];
+    })[0]?.result.summary;
+  const combinedSummary =
+    unprocessedMedia.length > 0
+      ? `${strongestMediaSummary ?? 'Chưa có tệp nào được phân tích.'} ${
+          unprocessedMedia.length
+        } tệp chưa được kiểm tra; kết quả chưa bao quát toàn bộ nội dung.`
+      : strongestMediaSummary ??
+        (allMediaFailed
+          ? 'Dịch vụ chưa thể phân tích các tệp này. Đây không phải kết luận an toàn.'
+          : 'Chưa có tệp nào được phân tích.');
 
   return (
     <div className="app-shell">
@@ -973,6 +1001,7 @@ export default function App() {
               <span className="risk-icon" aria-hidden="true">{presentation.icon}</span>
               <h1 id="report-title">{presentation.label}</h1>
             </div>
+            <p className="report-summary">{result.summary}</p>
             <div className="report-body">
               <section className="next-action">
                 <h2>Bạn nên làm gì?</h2>
@@ -982,6 +1011,23 @@ export default function App() {
               </section>
               <details className="report-details">
                 <summary>Xem giải thích chi tiết</summary>
+                <section className="report-section">
+                  <h2>Mức độ bằng chứng</h2>
+                  <p>Đoạn trích có thể đã ẩn thông tin riêng tư.</p>
+                  <p>
+                    {result.detected_behaviors.length > 0
+                      ? `Có ${result.detected_behaviors.length} trích dẫn khớp với nội dung đã gửi.`
+                      : 'Chưa có trích dẫn cụ thể khớp với nội dung đã gửi.'}
+                  </p>
+                  {result.transcription_status && (
+                    <p>
+                      Bản ghi âm:{' '}
+                      {result.transcription_status === 'COMPLETED' && 'đã nghe rõ lời nói chính.'}
+                      {result.transcription_status === 'PARTIAL' && 'chỉ nghe rõ một phần.'}
+                      {result.transcription_status === 'FAILED' && 'không nghe rõ lời nói.'}
+                    </p>
+                  )}
+                </section>
                 {result.recommendations.length > 1 && (
                   <section className="report-section">
                     <h2>Các bước tiếp theo</h2>
@@ -1057,6 +1103,7 @@ export default function App() {
                 </h1>
               </div>
             )}
+            <p className="report-summary">{combinedSummary}</p>
             <div className="report-body">
               <section className="next-action">
                 <h2>Bạn nên làm gì?</h2>
@@ -1070,6 +1117,11 @@ export default function App() {
                 <summary>Xem giải thích chi tiết</summary>
                 <section className="report-section">
                   <h2>Trạng thái từng tệp</h2>
+                  {mode === 'image' && currentBatch.length > 1 && (
+                    <p>
+                      Ảnh được kiểm tra theo thứ tự đã chọn. Nội dung giữa các ảnh chưa được ghép thành một cuộc hội thoại.
+                    </p>
+                  )}
                   <ul className="media-result-list">
                     {currentBatch.map((item) => (
                       <li className="media-result-item" key={item.id}>
@@ -1112,6 +1164,17 @@ export default function App() {
                           <>
                             <h3>{riskPresentation[item.result.risk_level].label}</h3>
                             <p>{item.result.summary}</p>
+                            {item.result.transcription_status && (
+                              <p>
+                                Bản ghi âm:{' '}
+                                {item.result.transcription_status === 'COMPLETED' &&
+                                  'đã nghe rõ lời nói chính.'}
+                                {item.result.transcription_status === 'PARTIAL' &&
+                                  'chỉ nghe rõ một phần.'}
+                                {item.result.transcription_status === 'FAILED' &&
+                                  'không nghe rõ lời nói.'}
+                              </p>
+                            )}
                             {item.result.detected_behaviors.map((behavior, index) => (
                               <div
                                 className="evidence-item"
