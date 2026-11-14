@@ -27,29 +27,28 @@ BEHAVIOR_CATALOG: dict[str, tuple[str, str]] = {
 
 _CREDENTIAL_TERMS = (
     r"(?:mat\s*khau|password|ma\s*otp|otp|ma\s*xac\s*thuc|ma\s*bao\s*mat|"
-    r"thong\s*tin\s*dang\s*nhap|thong\s*tin\s*tai\s*khoan)"
+    r"ma\s*pin|pin|thong\s*tin\s*dang\s*nhap|thong\s*tin\s*tai\s*khoan)"
 )
+_FINANCIAL_DATA_TERMS = (
+    r"(?:so\s*the|thong\s*tin\s*the|the\s*(?:tin\s*dung|ghi\s*no)|"
+    r"cvv|cvc|ma\s*pin|pin|ngay\s*het\s*han|han\s*su\s*dung)"
+)
+_SENSITIVE_TERMS = rf"(?:{_CREDENTIAL_TERMS}|{_FINANCIAL_DATA_TERMS})"
 _CREDENTIAL_TERM = re.compile(rf"\b{_CREDENTIAL_TERMS}\b", re.IGNORECASE)
+_SENSITIVE_TERM = re.compile(rf"\b{_SENSITIVE_TERMS}\b", re.IGNORECASE)
 _REQUEST_ACTIONS = (
     r"(?:nhap|dien|cung\s*cap|gui|chia\s*se|chuyen\s*tiep|"
     r"tra\s*loi|doc|xac\s*nhan)"
 )
-_CREDENTIAL_REQUEST_PATTERNS = (
+_SENSITIVE_REQUEST_PATTERNS = (
     re.compile(
-        rf"\b{_REQUEST_ACTIONS}\b[^.!?;\n]{{0,100}}?\b{_CREDENTIAL_TERMS}\b",
+        rf"\b{_REQUEST_ACTIONS}\b[^.!?;\n]{{0,100}}?\b{_SENSITIVE_TERMS}\b",
         re.IGNORECASE,
     ),
     re.compile(
-        rf"\b{_CREDENTIAL_TERMS}\b[^.!?;\n]{{0,100}}?\b{_REQUEST_ACTIONS}\b",
+        rf"\b{_SENSITIVE_TERMS}\b[^.!?;\n]{{0,100}}?\b{_REQUEST_ACTIONS}\b",
         re.IGNORECASE,
     ),
-)
-_NEGATED_REQUEST = re.compile(
-    r"\b(?:khong|dung|cho|chua)\s+(?:bao\s*gio\s+)?"
-    r"(?:(?:hay|vui\s*long)\s+)?(?:phai\s+)?"
-    r"(?:nhap|dien|cung\s*cap|gui|chia\s*se|chuyen\s*tiep|"
-    r"tra\s*loi|doc|xac\s*nhan)\b",
-    re.IGNORECASE,
 )
 _SENDER_LABEL = re.compile(r"\bnguoi\s*$", re.IGNORECASE)
 _SAFE_EDUCATIONAL_CONTEXT = re.compile(
@@ -61,6 +60,15 @@ _SAFE_EDUCATIONAL_CONTEXT = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _URL = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
+_LINK_RELATION = re.compile(
+    r"\b(?:link|lien\s*ket|truy\s*cap|bam|qua|tai|vao)\b",
+    re.IGNORECASE,
+)
+_URL_TO_REQUEST = re.compile(
+    r"\b(?:de|roi|va|sau\s*khi)\b[^.!?;\n]{0,40}"
+    r"\b(?:nhap|dien|gui|cung\s*cap|chia\s*se)\b",
+    re.IGNORECASE,
+)
 _URGENCY = re.compile(
     r"\b(?:trong\s+(?:vong\s+)?\d+\s*(?:phut|gio|ngay)|"
     r"(?:con|chi\s+con)\s+\d+\s*(?:phut|gio|ngay)|"
@@ -72,9 +80,75 @@ _FINANCIAL_ORGANIZATION = re.compile(
     r"to\s+chuc\s+tin\s+dung|bao\s+hiem|tai\s+khoan\s+ngan\s+hang)\b",
     re.IGNORECASE,
 )
-_EXFILTRATION_ACTION = re.compile(
-    rf"\b(?:gui|cung\s*cap|chia\s*se|chuyen\s*tiep|tra\s*loi|doc)\b"
-    rf"[^.!?;\n]{{0,100}}?\b{_CREDENTIAL_TERMS}\b",
+_NEGATION_BEFORE_ACTION = re.compile(
+    r"\b(?:khong|dung|cho|chua)\b"
+    r"(?:\s+(?:bao\s+gio|nen|can|duoc|the|dong\s+y|chap\s+nhan|"
+    r"yeu\s*cau|de\s*nghi|bat\s*buoc)){0,4}"
+    r"(?:\s+(?:hay|vui\s*long|phai|ban|yeu\s*cau|de\s*nghi|bat\s*buoc))*\s*$",
+    re.IGNORECASE,
+)
+_REQUEST_CUE_BEFORE_ACTION = re.compile(
+    r"\b(?:vui\s*long|hay|can|yeu\s*cau|de\s*nghi|ban\s+can|ban\s+hay)\b",
+    re.IGNORECASE,
+)
+_PASSIVE_ACTION_BEFORE = re.compile(
+    r"\b(?:da\s+)?(?:duoc|se\s+duoc)\s*$",
+    re.IGNORECASE,
+)
+_SPEAKER_HEADER = re.compile(
+    r"^\s*(?:tin\s*nhan\s+\d+\s*[-:]\s*)?"
+    r"(nguoi\s+(?:gui|nhan|[a-z0-9]+)|sender|recipient)\s*:\s*(.*)$",
+    re.IGNORECASE,
+)
+_AUTHORITY_CLAIM = re.compile(
+    r"\b(?:toi|chung\s*toi|chung\s*ta|dai\s*dien)\s+"
+    r"(?:la|thuoc|den\s*tu)\s+.{0,40}?"
+    r"\b(?:cong\s*an|bo\s*cong\s*an|co\s*quan\s+chuc\s*nang|"
+    r"toa\s*an|vien\s*kiem\s*sat|co\s*quan\s+thue|"
+    r"co\s*quan\s+nha\s*nuoc)\b",
+    re.IGNORECASE,
+)
+_TRANSFER_REQUEST = re.compile(
+    r"\b(?:chuyen\s+(?:khoan\s+)?tien|chuyen\s+khoan|"
+    r"nop\s+tien|gui\s+tien|nap\s+tien)\b",
+    re.IGNORECASE,
+)
+_THREAT = re.compile(
+    r"\b(?:neu\s+(?:ban\s+)?khong|khong\s+lam\s+theo\s+thi)\b"
+    r"[^.!?;\n]{0,80}?\b(?:se\s+)?(?:bi\s+)?"
+    r"(?:bat\s*giu|bat|phong\s*toa|khoi\s*to|giam|xu\s*ly|"
+    r"khoa\s*tai\s*khoan|truy\s*to)\b|"
+    r"\b(?:se|ngay\s+lap\s+tuc)\s+(?:bi\s+)?"
+    r"(?:bat\s*giu|bat|phong\s*toa|khoi\s*to|giam|xu\s*ly|"
+    r"khoa\s*tai\s*khoan|truy\s*to)\b",
+    re.IGNORECASE,
+)
+_SECRECY_REQUEST = re.compile(
+    r"\b(?:khong\s+duoc|dung|khong)\s+"
+    r"(?:noi|bao|ke|chia\s*se|tiet\s*lo)\b"
+    r"[^.!?;\n]{0,60}?\b(?:cho\s+ai|voi\s+ai|nguoi\s+than|"
+    r"gia\s*dinh|bat\s*ky\s*ai)\b",
+    re.IGNORECASE,
+)
+_EDUCATIONAL_FRAME = re.compile(
+    r"\b(?:bai\s*(?:bao|viet|hoc)|vi\s*du(?:\s+minh\s*hoa)?|"
+    r"huong\s*dan\s+phong\s*tranh|thu\s*doan\s+lua\s*dao|"
+    r"ke\s+lua\s*dao|ke\s*gian|canh\s*bao\s+ve\s+thu\s*doan)\b",
+    re.IGNORECASE,
+)
+_EDUCATIONAL_ADVICE = re.compile(
+    r"\b(?:khong\s+lam\s+theo|dung\s+lam\s+theo|"
+    r"khong\s+chuyen\s+tien|khong\s+cung\s*cap|"
+    r"khong\s+chia\s*se|dung\s+bam|hay\s+xac\s*minh)\b",
+    re.IGNORECASE,
+)
+_SAFE_MESSAGE = re.compile(
+    r"\b(?:khong\s+chia\s*se\s+(?:ma\s+)?otp|"
+    r"ngan\s+hang\s+khong\s+bao\s+gio\s+yeu\s+cau|"
+    r"dung\s+bam\s+(?:vao\s+)?duong\s+link\s+la|"
+    r"giao\s*dich\s+(?:da\s+)?thanh\s*cong|"
+    r"(?:ma\s+)?otp\s+(?:cua\s+ban\s+)?(?:da\s+duoc\s+gui|da\s+duoc\s+tao)|"
+    r"otp\b[^.!?;\n]{0,80}\bda\s+duoc\s+gui)\b",
     re.IGNORECASE,
 )
 
@@ -126,28 +200,68 @@ def _find_explicit_credential_request(
     text: str,
     context: str = "",
 ) -> str | None:
+    return _find_explicit_sensitive_request(text, context, credentials_only=True)
+
+
+def _find_explicit_sensitive_request(
+    text: str,
+    context: str = "",
+    credentials_only: bool = False,
+) -> str | None:
     normalized, starts, ends = _normalize_with_offsets(text)
     normalized_context, _, _ = _normalize_with_offsets(context)
+    searchable = normalized.replace("\n", " ")
+    searchable_context = normalized_context.replace("\n", " ")
+    sensitive_terms = _CREDENTIAL_TERMS if credentials_only else _SENSITIVE_TERMS
+    sensitive_term = _CREDENTIAL_TERM if credentials_only else _SENSITIVE_TERM
+    patterns = (
+        tuple(
+            re.compile(pattern.pattern.replace(_SENSITIVE_TERMS, sensitive_terms), re.IGNORECASE)
+            for pattern in _SENSITIVE_REQUEST_PATTERNS
+        )
+        if credentials_only
+        else _SENSITIVE_REQUEST_PATTERNS
+    )
 
     candidates: list[re.Match[str]] = []
-    for pattern in _CREDENTIAL_REQUEST_PATTERNS:
+    for pattern in patterns:
         offset = 0
-        while match := pattern.search(normalized, offset):
+        while match := pattern.search(searchable, offset):
             candidates.append(match)
             offset = match.start() + 1
     for match in sorted(candidates, key=lambda candidate: candidate.start()):
+        action_matches = list(re.finditer(rf"\b{_REQUEST_ACTIONS}\b", match.group()))
+        action_match = next(iter(action_matches), None)
+        if action_match is None:
+            continue
+        action_start = match.start() + action_match.start()
         clause_start = max(
-            normalized.rfind(delimiter, 0, match.start())
+            normalized.rfind(delimiter, 0, action_start)
             for delimiter in ".!?;\n"
         )
-        clause = normalized[clause_start + 1 : match.end()]
-        if _SENDER_LABEL.search(normalized[clause_start + 1 : match.start()]):
+        action_prefix = searchable[
+            max(clause_start + 1, action_start - 60) : action_start
+        ]
+        if _NEGATION_BEFORE_ACTION.search(
+            action_prefix
+        ):
             continue
-        if _NEGATED_REQUEST.search(clause):
+        if (
+            action_start > match.start()
+            and not _REQUEST_CUE_BEFORE_ACTION.search(action_prefix)
+            and not re.search(
+                r"\b(?:cho|den)\s+toi\b",
+                searchable[action_start : min(len(searchable), action_start + 40)],
+            )
+        ):
+            continue
+        if _PASSIVE_ACTION_BEFORE.search(action_prefix):
+            continue
+        if _SENDER_LABEL.search(normalized[clause_start + 1 : action_start]):
             continue
         context_start = (
-            normalized_context.find(match.group())
-            if normalized_context and normalized_context != normalized
+            searchable_context.find(match.group())
+            if searchable_context and searchable_context != searchable
             else match.start()
         )
         if context_start >= 0:
@@ -155,23 +269,22 @@ def _find_explicit_credential_request(
                 normalized_context.rfind(delimiter, 0, context_start)
                 for delimiter in ".!?;\n"
             )
-            context_clause = normalized_context[
-                context_clause_start + 1 : context_start + len(match.group())
-            ]
+            context_action = context_start + action_match.start()
+            if _NEGATION_BEFORE_ACTION.search(
+                searchable_context[max(context_clause_start + 1, context_action - 60) : context_action]
+            ):
+                continue
             line_start = normalized_context.rfind("\n", 0, context_start) + 1
             line_end = normalized_context.find(
                 "\n", context_start + len(match.group())
             )
             if line_end < 0:
-                line_end = len(normalized_context)
-            context_window = normalized_context[
+                line_end = len(searchable_context)
+            context_window = searchable_context[
                 max(line_start, context_start - 240) : min(
-                    line_end,
-                    context_start + len(match.group()) + 240,
+                    line_end, context_start + len(match.group()) + 240
                 )
             ]
-            if _NEGATED_REQUEST.search(context_clause):
-                continue
             if _SAFE_EDUCATIONAL_CONTEXT.search(context_window):
                 continue
         elif _SAFE_EDUCATIONAL_CONTEXT.search(normalized):
@@ -179,15 +292,82 @@ def _find_explicit_credential_request(
 
         match_end = match.end()
         while True:
-            next_term = _CREDENTIAL_TERM.search(normalized, match_end, match_end + 32)
+            next_term = sensitive_term.search(searchable, match_end, match_end + 32)
             if next_term is None:
                 break
-            connector = normalized[match_end : next_term.start()]
+            connector = searchable[match_end : next_term.start()]
             if not re.fullmatch(r"\s*(?:(?:,|and|va|cung|hoac)\s*)+", connector):
                 break
             match_end = next_term.end()
         return _excerpt_from_normalized(text, starts, ends, match.start(), match_end)
     return None
+
+
+def _message_groups(source: str) -> list[str]:
+    lines = source.splitlines()
+    parsed_lines: list[tuple[str | None, str]] = []
+    has_speaker_labels = False
+    for line in lines:
+        normalized, _, _ = _normalize_with_offsets(line)
+        match = _SPEAKER_HEADER.match(normalized)
+        if match is None:
+            parsed_lines.append((None, line))
+        else:
+            has_speaker_labels = True
+            parsed_lines.append((match.group(1), match.group(2)))
+    if not has_speaker_labels:
+        return [source]
+
+    groups: list[list[str]] = []
+    current_speaker = "__unlabeled__"
+    for speaker, text in parsed_lines:
+        if speaker is not None and speaker != current_speaker:
+            current_speaker = speaker
+            groups.append([])
+        elif not groups:
+            groups.append([])
+        groups[-1].append(text)
+    return ["\n".join(lines) for lines in groups if any(lines)]
+
+
+def _is_educational_context(text: str) -> bool:
+    normalized, _, _ = _normalize_with_offsets(text)
+    return (
+        _EDUCATIONAL_FRAME.search(normalized) is not None
+        and _EDUCATIONAL_ADVICE.search(normalized) is not None
+    )
+
+
+def _original_match(text: str, pattern: re.Pattern[str]) -> str | None:
+    normalized, starts, ends = _normalize_with_offsets(text)
+    match = pattern.search(normalized)
+    if match is None:
+        return None
+    return _excerpt_from_normalized(text, starts, ends, match.start(), match.end())
+
+
+def _has_unnegated_match(text: str, pattern: re.Pattern[str]) -> bool:
+    normalized, _, _ = _normalize_with_offsets(text)
+    searchable = normalized.replace("\n", " ")
+    for match in pattern.finditer(searchable):
+        clause_start = max(
+            normalized.rfind(delimiter, 0, match.start())
+            for delimiter in ".!?;\n"
+        )
+        prefix = searchable[max(clause_start + 1, match.start() - 60) : match.start()]
+        if not _NEGATION_BEFORE_ACTION.search(prefix):
+            return True
+    return False
+
+
+def _classify_sensitive_request(evidence: str) -> str:
+    normalized, _, _ = _normalize_with_offsets(evidence)
+    return (
+        "PERSONAL_DATA_HARVESTING"
+        if _FINANCIAL_DATA_TERMS
+        and re.search(rf"\b{_FINANCIAL_DATA_TERMS}\b", normalized)
+        else "CREDENTIAL_OTP_THEFT"
+    )
 
 
 def _is_explicit_credential_request(text: str, context: str = "") -> bool:
@@ -210,6 +390,34 @@ def _context_around_evidence(source: str, evidence: str) -> str:
     return source[start:end]
 
 
+def _extract_related_url(source: str, evidence: str) -> str | None:
+    evidence_start = source.find(evidence)
+    if evidence_start < 0:
+        return None
+    evidence_end = evidence_start + len(evidence)
+    for match in _URL.finditer(source):
+        distance = (
+            match.start() - evidence_end
+            if match.start() >= evidence_end
+            else evidence_start - match.end()
+        )
+        if distance < 0 or distance > 120:
+            continue
+        if match.start() >= evidence_end:
+            relation, _, _ = _normalize_with_offsets(
+                source[evidence_end : match.start()]
+            )
+            related = _LINK_RELATION.search(relation) is not None
+        else:
+            relation, _, _ = _normalize_with_offsets(
+                source[match.end() : evidence_start] + evidence
+            )
+            related = _URL_TO_REQUEST.search(relation) is not None
+        if related:
+            return match.group().rstrip(".,;:!?)]}")
+    return None
+
+
 def _extract_urgency(text: str) -> str | None:
     normalized, starts, ends = _normalize_with_offsets(text)
     match = _URGENCY.search(normalized)
@@ -221,11 +429,6 @@ def _extract_urgency(text: str) -> str | None:
 def _has_financial_organization_reference(text: str) -> bool:
     normalized, _, _ = _normalize_with_offsets(text)
     return _FINANCIAL_ORGANIZATION.search(normalized) is not None
-
-
-def _is_credential_exfiltration_request(text: str) -> bool:
-    normalized, _, _ = _normalize_with_offsets(text)
-    return _EXFILTRATION_ACTION.search(normalized) is not None
 
 
 def _credential_labels(text: str) -> str:
@@ -250,12 +453,19 @@ def _credential_request_uses_entry_verb(text: str) -> bool:
 class EvidenceAssessment:
     findings: list[DetectedBehavior]
     invalid_evidence_count: int
+    high_risk_scenarios: frozenset[str] = frozenset()
+    safe_context: bool = False
+    educational_context: bool = False
 
 
 class EvidenceEngine:
     @staticmethod
     def is_explicit_credential_request(text: str, context: str = "") -> bool:
         return _is_explicit_credential_request(text, context)
+
+    @staticmethod
+    def is_explicit_sensitive_data_request(text: str, context: str = "") -> bool:
+        return _find_explicit_sensitive_request(text, context) is not None
 
     @staticmethod
     def _find_verbatim_excerpt(source: str, quote: str) -> str | None:
@@ -299,14 +509,31 @@ class EvidenceEngine:
     ) -> EvidenceAssessment:
         findings: list[DetectedBehavior] = []
         invalid_count = 0
+        message_groups = _message_groups(source_text)
+        educational_groups = [
+            group for group in message_groups if _is_educational_context(group)
+        ]
         for finding in output.detected_behaviors:
             excerpt = self._find_verbatim_excerpt(source_text, finding.evidence)
             if excerpt is None:
                 invalid_count += 1
                 continue
+            normalized_excerpt, _, _ = _normalize_with_offsets(excerpt)
+            if _SAFE_MESSAGE.search(normalized_excerpt) and not _find_explicit_sensitive_request(
+                excerpt, source_text
+            ):
+                continue
+            if any(
+                self._find_verbatim_excerpt(group, excerpt) is not None
+                for group in educational_groups
+            ):
+                continue
             behavior_type = finding.type
-            if _is_explicit_credential_request(excerpt, source_text):
-                behavior_type = "CREDENTIAL_OTP_THEFT"
+            sensitive_request = _find_explicit_sensitive_request(
+                excerpt, source_text
+            )
+            if sensitive_request:
+                behavior_type = _classify_sensitive_request(sensitive_request)
             elif behavior_type == "CREDENTIAL_OTP_THEFT":
                 continue
             name_vi, description = BEHAVIOR_CATALOG.get(
@@ -329,96 +556,170 @@ class EvidenceEngine:
                     supported_by=[provider_name],
                 )
             )
-        credential_evidence = _find_explicit_credential_request(
-            source_text,
-            source_text,
-        )
-        related_context = (
-            _context_around_evidence(source_text, credential_evidence)
-            if credential_evidence is not None
-            else ""
-        )
-        url_evidence = _extract_url(related_context)
-        urgency_evidence = _extract_urgency(related_context)
-        credential_context_is_suspicious = (
-            credential_evidence is not None
-            and (
-                _is_credential_exfiltration_request(credential_evidence)
-                or url_evidence is not None
-                or (
-                    _has_financial_organization_reference(related_context)
-                    and urgency_evidence is not None
-                )
-            )
-        )
-        if credential_context_is_suspicious and credential_evidence is not None:
-            normalized_credential, _, _ = _normalize_with_offsets(
-                credential_evidence
-            )
-            matching_credentials = [
-                finding
-                for finding in findings
-                if finding.type == "CREDENTIAL_OTP_THEFT"
+
+        high_risk_scenarios: set[str] = set()
+
+        def add_engine_finding(behavior_type: str, evidence: str, explanation: str) -> None:
+            normalized_evidence, _, _ = _normalize_with_offsets(evidence)
+            if any(
+                item.type == behavior_type
                 and (
-                    normalized_credential
-                    in _normalize_with_offsets(finding.evidence)[0]
-                    or _normalize_with_offsets(finding.evidence)[0]
-                    in normalized_credential
-                )
-            ]
-            if not any(
-                len(_normalize_with_offsets(finding.evidence)[0])
-                >= len(normalized_credential)
-                for finding in matching_credentials
-            ):
-                findings = [
-                    finding
-                    for finding in findings
-                    if finding not in matching_credentials
-                ]
-                findings.insert(
-                    0,
-                    DetectedBehavior(
-                        type="CREDENTIAL_OTP_THEFT",
-                        name_vi=BEHAVIOR_CATALOG["CREDENTIAL_OTP_THEFT"][0],
-                        description=BEHAVIOR_CATALOG["CREDENTIAL_OTP_THEFT"][1],
-                        evidence=credential_evidence,
-                        explanation=(
-                            "Dấu hiệu này dựa trên đoạn trích; nội dung yêu cầu "
-                            "nhập hoặc cung cấp thông tin xác thực."
-                        ),
-                        supported_by=["evidence_engine"],
-                    ),
-                )
-            if url_evidence:
-                findings.append(
-                    DetectedBehavior(
-                        type="SUSPICIOUS_WEBSITE_REDIRECTION",
-                        name_vi=BEHAVIOR_CATALOG["SUSPICIOUS_WEBSITE_REDIRECTION"][0],
-                        description=BEHAVIOR_CATALOG["SUSPICIOUS_WEBSITE_REDIRECTION"][1],
-                        evidence=url_evidence,
-                        explanation=(
-                            "Đường dẫn xuất hiện cùng yêu cầu thông tin xác thực; "
-                            "chưa xác minh website."
-                        ),
-                        supported_by=["evidence_engine"],
+                    item.evidence == evidence
+                    or (
+                        behavior_type
+                        in {"CREDENTIAL_OTP_THEFT", "PERSONAL_DATA_HARVESTING"}
+                        and normalized_evidence
+                        in _normalize_with_offsets(item.evidence)[0]
                     )
+                )
+                for item in findings
+            ):
+                return
+            name_vi, description = BEHAVIOR_CATALOG[behavior_type]
+            finding = DetectedBehavior(
+                type=behavior_type,
+                name_vi=name_vi,
+                description=description,
+                evidence=evidence,
+                explanation=explanation,
+                supported_by=["evidence_engine"],
+            )
+            if behavior_type in {
+                "CREDENTIAL_OTP_THEFT",
+                "PERSONAL_DATA_HARVESTING",
+            }:
+                findings.insert(0, finding)
+            else:
+                findings.append(finding)
+
+        for group in message_groups:
+            if _is_educational_context(group):
+                continue
+            sensitive_evidence = _find_explicit_sensitive_request(group, group)
+            if sensitive_evidence is None:
+                continue
+            sensitive_type = _classify_sensitive_request(sensitive_evidence)
+            add_engine_finding(
+                sensitive_type,
+                sensitive_evidence,
+                "Đoạn trích có hành động yêu cầu thông tin nhạy cảm; danh tính người gửi chưa được xác minh.",
+            )
+            related_context = _context_around_evidence(group, sensitive_evidence)
+            url_evidence = _extract_related_url(group, sensitive_evidence)
+            urgency_evidence = _extract_urgency(related_context)
+            if url_evidence:
+                add_engine_finding(
+                    "SUSPICIOUS_WEBSITE_REDIRECTION",
+                    url_evidence,
+                    "Đường dẫn xuất hiện cùng yêu cầu thông tin nhạy cảm; chưa xác minh website.",
                 )
             if urgency_evidence:
-                findings.append(
-                    DetectedBehavior(
-                        type="URGENCY_PRESSURE",
-                        name_vi=BEHAVIOR_CATALOG["URGENCY_PRESSURE"][0],
-                        description=BEHAVIOR_CATALOG["URGENCY_PRESSURE"][1],
-                        evidence=urgency_evidence,
-                        explanation=(
-                            "Nội dung nêu thời hạn hoặc yêu cầu xử lý gấp; "
-                            "đoạn trích không xác minh hậu quả thực tế."
-                        ),
-                        supported_by=["evidence_engine"],
+                add_engine_finding(
+                    "URGENCY_PRESSURE",
+                    urgency_evidence,
+                    "Nội dung nêu thời hạn hoặc yêu cầu xử lý gấp; hậu quả thực tế chưa được xác minh.",
+                )
+            if url_evidence and sensitive_type in {
+                "CREDENTIAL_OTP_THEFT",
+                "PERSONAL_DATA_HARVESTING",
+            }:
+                high_risk_scenarios.add("sensitive_data_link")
+
+        for group in message_groups:
+            if _is_educational_context(group):
+                continue
+            authority_evidence = _original_match(group, _AUTHORITY_CLAIM)
+            transfer_evidence = _original_match(group, _TRANSFER_REQUEST)
+            threat_evidence = _original_match(group, _THREAT)
+            secrecy_evidence = _original_match(group, _SECRECY_REQUEST)
+            urgency_evidence = _extract_urgency(group)
+            coercive_authority_transfer = (
+                authority_evidence is not None
+                and transfer_evidence is not None
+                and (
+                    threat_evidence is not None
+                    or (
+                        secrecy_evidence is not None
+                        and urgency_evidence is not None
                     )
                 )
-        return EvidenceAssessment(findings, invalid_count)
+            )
+            if not coercive_authority_transfer:
+                continue
+            high_risk_scenarios.add("authority_transfer_coercion")
+            add_engine_finding(
+                "AUTHORITY_IMPERSONATION",
+                authority_evidence,
+                "Người gửi tự nhận thuộc cơ quan có thẩm quyền; danh tính chưa được xác minh.",
+            )
+            add_engine_finding(
+                "UNUSUAL_PAYMENT_REQUEST",
+                transfer_evidence,
+                "Nội dung yêu cầu chuyển hoặc nộp tiền trong cùng ngữ cảnh cưỡng ép.",
+            )
+            if threat_evidence:
+                add_engine_finding(
+                    "THREATENED_CONSEQUENCES",
+                    threat_evidence,
+                    "Nội dung nêu hậu quả tiêu cực để gây sức ép; sự việc chưa được xác minh.",
+                )
+            if secrecy_evidence:
+                add_engine_finding(
+                    "SECRECY_REQUEST",
+                    secrecy_evidence,
+                    "Nội dung yêu cầu không chia sẻ hoặc xác minh với người khác.",
+                )
+            if urgency_evidence:
+                add_engine_finding(
+                    "URGENCY_PRESSURE",
+                    urgency_evidence,
+                    "Nội dung tạo áp lực thời gian trong cùng ngữ cảnh yêu cầu chuyển tiền.",
+                )
+
+        for group in message_groups:
+            group_types = {
+                finding.type
+                for finding in findings
+                if self._find_verbatim_excerpt(group, finding.evidence) is not None
+            }
+            if (
+                "AUTHORITY_IMPERSONATION" in group_types
+                and "UNUSUAL_PAYMENT_REQUEST" in group_types
+                and (
+                    "THREATENED_CONSEQUENCES" in group_types
+                    or (
+                        "SECRECY_REQUEST" in group_types
+                        and "URGENCY_PRESSURE" in group_types
+                    )
+                )
+            ):
+                high_risk_scenarios.add("authority_transfer_coercion")
+
+        normalized_source, _, _ = _normalize_with_offsets(source_text)
+        safe_context = (
+            _SAFE_MESSAGE.search(normalized_source) is not None
+            and not any(
+                _find_explicit_sensitive_request(group, group) is not None
+                for group in message_groups
+            )
+            and not any(
+                not _is_educational_context(group)
+                and (
+                    _has_unnegated_match(group, _TRANSFER_REQUEST)
+                    or _THREAT.search(
+                        _normalize_with_offsets(group)[0]
+                    )
+                )
+                for group in message_groups
+            )
+        )
+        return EvidenceAssessment(
+            findings,
+            invalid_count,
+            frozenset(high_risk_scenarios),
+            safe_context,
+            bool(message_groups) and len(educational_groups) == len(message_groups),
+        )
 
     @staticmethod
     def has_explicit_credential_request(text: str) -> bool:
@@ -430,7 +731,10 @@ class EvidenceEngine:
 
     @staticmethod
     def related_context(source: str, evidence: str) -> str:
-        return _context_around_evidence(source, evidence)
+        for group in _message_groups(source):
+            if EvidenceEngine._find_verbatim_excerpt(group, evidence) is not None:
+                return _context_around_evidence(group, evidence)
+        return source
 
     @staticmethod
     def extract_urgency(text: str) -> str | None:

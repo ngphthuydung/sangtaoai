@@ -463,18 +463,14 @@ class ScamAnalysisService:
         credential_findings = [
             finding
             for finding in assessment.findings
-            if finding.type == "CREDENTIAL_OTP_THEFT"
-            and EvidenceEngine.is_explicit_credential_request(
+            if finding.type
+            in {"CREDENTIAL_OTP_THEFT", "PERSONAL_DATA_HARVESTING"}
+            and EvidenceEngine.is_explicit_sensitive_data_request(
                 finding.evidence, source_text
             )
         ]
         high_risk_combination = (
-            "AUTHORITY_IMPERSONATION" in finding_types
-            and "UNUSUAL_PAYMENT_REQUEST" in finding_types
-            and bool(
-                finding_types
-                & {"THREATENED_CONSEQUENCES", "URGENCY_PRESSURE"}
-            )
+            "authority_transfer_coercion" in assessment.high_risk_scenarios
         )
         bank_credential_finding = None
         bank_credential_context = ""
@@ -496,7 +492,9 @@ class ScamAnalysisService:
                 or high_risk_combination
             )
         )
-        if (
+        if evidence_complete and assessment.high_risk_scenarios:
+            risk = RiskLevel.HIGH_RISK
+        elif (
             evidence_complete
             and bank_credential_link_combo
         ) or (
@@ -521,6 +519,19 @@ class ScamAnalysisService:
         ):
             risk = RiskLevel.SUSPICIOUS
         elif (
+            assessment.safe_context
+            and not assessment.findings
+            and evidence_complete
+        ):
+            risk = RiskLevel.LOW_RISK
+        elif (
+            assessment.educational_context
+            and not assessment.findings
+            and output.risk_level != RiskLevel.HIGH_RISK
+            and evidence_complete
+        ):
+            risk = RiskLevel.LOW_RISK
+        elif (
             output.risk_level == RiskLevel.LOW_RISK
             and not assessment.findings
             and not invalid
@@ -535,8 +546,9 @@ class ScamAnalysisService:
                 (
                     item
                     for item in assessment.findings
-                    if item.type == "CREDENTIAL_OTP_THEFT"
-                    and EvidenceEngine.is_explicit_credential_request(
+                    if item.type
+                    in {"CREDENTIAL_OTP_THEFT", "PERSONAL_DATA_HARVESTING"}
+                    and EvidenceEngine.is_explicit_sensitive_data_request(
                         item.evidence, source_text
                     )
                 ),
@@ -557,6 +569,41 @@ class ScamAnalysisService:
                     "Tin nhắn có nguy cơ lừa đảo cao vì yêu cầu "
                     f"{action} {EvidenceEngine.credential_labels(finding.evidence)} "
                     f"qua đường link, đồng thời gây áp lực bằng thời hạn “{urgency}”."
+                )
+            elif "sensitive_data_link" in assessment.high_risk_scenarios:
+                summary = (
+                    "Có nguy cơ cao vì nội dung yêu cầu thông tin nhạy cảm qua "
+                    f"đường link: “{finding.evidence}”. "
+                    "Chưa xác minh người gửi hoặc website."
+                )
+            elif "authority_transfer_coercion" in assessment.high_risk_scenarios:
+                authority = next(
+                    item
+                    for item in assessment.findings
+                    if item.type == "AUTHORITY_IMPERSONATION"
+                )
+                transfer = next(
+                    item
+                    for item in assessment.findings
+                    if item.type == "UNUSUAL_PAYMENT_REQUEST"
+                )
+                pressure = next(
+                    (
+                        item
+                        for item in assessment.findings
+                        if item.type
+                        in {"THREATENED_CONSEQUENCES", "SECRECY_REQUEST"}
+                    ),
+                    None,
+                )
+                summary = (
+                    "Có nguy cơ cao vì nội dung kết hợp dấu hiệu liên quan đến cơ quan, "
+                    "yêu cầu chuyển tiền và gây sức ép. "
+                    f"Bằng chứng: “{authority.evidence}”; “{transfer.evidence}”"
+                    + (
+                        f"; “{pressure.evidence}”." if pressure else "."
+                    )
+                    + " Danh tính người gửi chưa được xác minh."
                 )
             else:
                 summary = (
@@ -601,7 +648,9 @@ class ScamAnalysisService:
             risk,
             summary,
             assessment.findings,
-            self._recommended_actions(risk, finding_types),
+            self._recommended_actions(
+                risk, finding_types, assessment.high_risk_scenarios
+            ),
             ["Danh tính người gửi và thông tin bên ngoài chưa được xác minh."],
             cross_check_status,
             cross_check_summary,
@@ -612,8 +661,21 @@ class ScamAnalysisService:
     def _recommended_actions(
         risk: RiskLevel,
         finding_types: set[str],
+        high_risk_scenarios: frozenset[str] = frozenset(),
     ) -> list[str]:
         if risk == RiskLevel.HIGH_RISK:
+            if "sensitive_data_link" in high_risk_scenarios:
+                if "PERSONAL_DATA_HARVESTING" in finding_types:
+                    return [
+                        "Không nhập thông tin thẻ, mật khẩu hoặc mã OTP qua đường link trong tin nhắn. Hãy kiểm tra đơn hàng bằng ứng dụng hoặc kênh chính thức."
+                    ]
+                return [
+                    "Không truy cập liên kết hoặc cung cấp mật khẩu, OTP. Hãy liên hệ ngân hàng qua ứng dụng hoặc số tổng đài chính thức bạn tự tìm."
+                ]
+            if "authority_transfer_coercion" in high_risk_scenarios:
+                return [
+                    "Không chuyển tiền theo yêu cầu đe dọa trong tin nhắn. Hãy xác minh qua cơ quan chức năng bằng kênh liên hệ chính thức."
+                ]
             if "CREDENTIAL_OTP_THEFT" in finding_types:
                 return [
                     "Không truy cập liên kết hoặc cung cấp mật khẩu, OTP. Hãy liên hệ ngân hàng qua ứng dụng hoặc số tổng đài chính thức bạn tự tìm."
@@ -725,8 +787,13 @@ def redact_sensitive_data(value: str) -> str:
         r"\1: [SỐ_GIẤY_TỜ_HOẶC_TÀI_KHOẢN_ẨN]",
         value,
     )
+    value = re.sub(
+        r"(?i)(mật khẩu|password|mã otp|otp|mã xác thực|mã bảo mật)\s*(?:là|:|=)\s*[^\s,;.]+",
+        r"\1: [THÔNG_TIN_BÍ_MẬT_ẨN]",
+        value,
+    )
     return re.sub(
-        r"(?i)(mật khẩu|password|mã otp|otp|mã xác thực)\s*(?:là|:|=)\s*[^\s,;.]+",
+        r"(?i)(cvv|cvc|mã pin|pin|ngày hết hạn|hạn sử dụng)\s*(?:là|:|=)\s*[^\s,;.]+",
         r"\1: [THÔNG_TIN_BÍ_MẬT_ẨN]",
         value,
     )

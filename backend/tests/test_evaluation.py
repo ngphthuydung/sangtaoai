@@ -17,10 +17,21 @@ def test_scam_metrics_count_unresolved_as_false_negative():
     assert result["scam_precision"] == 0.5
     assert result["scam_recall"] == 0.5
     assert result["false_negative_rate"] == 0.5
+    assert result["false_positive_rate"] == 0.5
+    assert result["insufficient_data_cases"] == 1
     assert result["confusion_matrix"] == {
         "SCAM": {"SCAM": 1, "NOT_SCAM": 0, "UNRESOLVED": 1},
         "NOT_SCAM": {"SCAM": 1, "NOT_SCAM": 1, "UNRESOLVED": 0},
     }
+
+
+def test_evaluation_reports_zero_false_positive_rate_without_legitimate_cases():
+    result = calculate_metrics(
+        [{"case_id": "scam", "expected": "SCAM", "predicted": "HIGH_RISK"}]
+    )
+
+    assert result["false_positive_rate"] == 0.0
+    assert result["insufficient_data_cases"] == 0
 
 
 @pytest.mark.parametrize(

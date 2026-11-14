@@ -74,6 +74,36 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
+def analyze_synthetic_content(
+    content: str,
+    risk: RiskLevel = RiskLevel.SUSPICIOUS,
+    findings: list[tuple[str, str]] | None = None,
+):
+    output = ModelAnalysisOutput(
+        risk_level=risk,
+        summary="Kết quả mô phỏng.",
+        detected_behaviors=[
+            {
+                "type": behavior_type,
+                "name_vi": "Dấu hiệu cần kiểm tra",
+                "description": "Dấu hiệu do provider giả lập trả về.",
+                "evidence": evidence,
+                "explanation": "Mô phỏng kiểm thử.",
+            }
+            for behavior_type, evidence in findings or []
+        ],
+        recommendations=["Xác minh qua kênh chính thức."],
+    )
+    return run(
+        ScamAnalysisService(
+            gemini_provider=FakeProvider("gemini", output),
+            configuration=configured_settings(OPENAI_API_KEY=None),
+        ).analyze(
+            ScamAnalysisRequest(content=content, allow_external_processing=True)
+        )
+    )
+
+
 def test_requires_consent_and_real_openai_configuration():
     openai = FakeProvider("openai", model_output())
     service = ScamAnalysisService(openai_provider=openai)
@@ -800,7 +830,7 @@ def test_legitimate_otp_warning_is_not_escalated_by_a_low_risk_result():
                 ("UNUSUAL_PAYMENT_REQUEST", "Chuyển tiền để xác minh ngay"),
                 ("THREATENED_CONSEQUENCES", "nếu không sẽ phong tỏa tài khoản"),
             ],
-            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
         ),
     ],
     ids=[
@@ -837,8 +867,314 @@ def test_clear_verified_scam_signals_cannot_remain_low_risk(
     )
 
     assert result.risk_level == expected_risk
-    assert result.risk_level != RiskLevel.HIGH_RISK
+    assert result.risk_level != RiskLevel.LOW_RISK
     assert all(finding.evidence in content for finding in result.detected_behaviors)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (
+            "Chúng tôi là đơn vị giao hàng. Nhập số thẻ và mã OTP tại "
+            "https://parcel.example/verify để nhận hàng.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Nhân viên giao hàng yêu cầu nhập CVV tại "
+            "https://parcel.example/pay.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Vui lòng điền số thẻ và ngày hết hạn tại "
+            "https://parcel.example/confirm.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Đơn hàng sẽ được giao vào ngày mai. Có thể kiểm tra trạng thái "
+            "trong ứng dụng giao hàng.",
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Đơn hàng có link tra cứu https://parcel.example. Mã OTP chỉ dùng "
+            "trong ứng dụng ngân hàng; không chia sẻ với ai.",
+            RiskLevel.LOW_RISK,
+        ),
+    ],
+    ids=[
+        "delivery-card-and-otp-link",
+        "delivery-cvv-link",
+        "delivery-card-expiry-link",
+        "ordinary-delivery",
+        "unrelated-link-and-otp-context",
+    ],
+)
+def test_delivery_sensitive_data_scenarios(content, expected):
+    result = analyze_synthetic_content(content, RiskLevel.LOW_RISK)
+
+    assert result.risk_level == expected
+    if expected == RiskLevel.HIGH_RISK:
+        assert result.detected_behaviors
+        assert all(item.evidence in content for item in result.detected_behaviors)
+        assert "Không nhập thông tin thẻ" in result.recommendations[0]
+
+
+@pytest.mark.parametrize(
+    ("content", "model_risk", "expected"),
+    [
+        (
+            "Tôi là công an. Chuyển tiền vào tài khoản này ngay, nếu không "
+            "sẽ bị bắt giữ.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Tôi là đại diện cơ quan chức năng. Chuyển tiền ngay và không "
+            "được báo cho người thân trong 30 phút.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Bài viết có nhắc đến công an và quy trình tiếp nhận tin báo.",
+            RiskLevel.LOW_RISK,
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Vui lòng chuyển tiền cho cửa hàng theo hóa đơn đã thống nhất.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+    ],
+    ids=[
+        "authority-transfer-threat",
+        "authority-transfer-secrecy-and-deadline",
+        "authority-reference-only",
+        "payment-request-only",
+    ],
+)
+def test_authority_transfer_requires_contextual_coercion(
+    content, model_risk, expected
+):
+    result = analyze_synthetic_content(content, model_risk)
+
+    assert result.risk_level == expected
+    if expected == RiskLevel.HIGH_RISK:
+        assert {
+            "AUTHORITY_IMPERSONATION",
+            "UNUSUAL_PAYMENT_REQUEST",
+        }.issubset({item.type for item in result.detected_behaviors})
+        assert "Không chuyển tiền theo yêu cầu đe dọa" in result.recommendations[0]
+
+
+@pytest.mark.parametrize(
+    ("content", "model_finding", "expected"),
+    [
+        (
+            "Ngân hàng nhắc: Không chia sẻ mã OTP cho bất kỳ ai.",
+            ("CREDENTIAL_OTP_THEFT", "Không chia sẻ mã OTP"),
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Giao dịch thành công. Nếu không nhận ra giao dịch, hãy liên hệ ngân hàng.",
+            ("UNUSUAL_PAYMENT_REQUEST", "Giao dịch thành công"),
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Mã OTP xác thực giao dịch đã được gửi đến thiết bị của bạn.",
+            ("CREDENTIAL_OTP_THEFT", "Mã OTP xác thực giao dịch đã được gửi"),
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Ngân hàng gửi thông báo xem lịch giao dịch tại https://bank.example/history.",
+            ("SUSPICIOUS_WEBSITE_REDIRECTION", "https://bank.example/history"),
+            RiskLevel.SUSPICIOUS,
+        ),
+    ],
+    ids=[
+        "bank-otp-warning",
+        "successful-transaction",
+        "routine-otp-delivery",
+        "url-without-sensitive-request",
+    ],
+)
+def test_legitimate_financial_notifications_are_not_escalated(
+    content, model_finding, expected
+):
+    result = analyze_synthetic_content(
+        content,
+        RiskLevel.SUSPICIOUS,
+        findings=[model_finding],
+    )
+
+    assert result.risk_level == expected
+    assert result.risk_level != RiskLevel.HIGH_RISK
+
+
+def test_bank_warning_that_never_requests_otp_is_not_misread_as_a_request():
+    result = analyze_synthetic_content(
+        "Ngân hàng không bao giờ yêu cầu bạn nhập mã OTP.",
+        RiskLevel.HIGH_RISK,
+        findings=[("CREDENTIAL_OTP_THEFT", "nhập mã OTP")],
+    )
+
+    assert result.risk_level == RiskLevel.LOW_RISK
+    assert result.detected_behaviors == []
+
+
+def test_safe_warning_does_not_hide_a_separate_transfer_request():
+    result = analyze_synthetic_content(
+        "Ngân hàng nhắc: Không chia sẻ mã OTP. "
+        "Vui lòng chuyển tiền cho cửa hàng theo hóa đơn.",
+        RiskLevel.SUSPICIOUS,
+    )
+
+    assert result.risk_level != RiskLevel.LOW_RISK
+    assert result.risk_level != RiskLevel.HIGH_RISK
+
+
+@pytest.mark.parametrize(
+    ("content", "model_risk", "expected"),
+    [
+        (
+            "Bài báo: Kẻ lừa đảo yêu cầu nhập mã OTP để chiếm tài khoản. "
+            "Không làm theo và hãy xác minh qua ngân hàng.",
+            RiskLevel.HIGH_RISK,
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+        (
+            "Cảnh báo về thủ đoạn lừa đảo: kẻ gian yêu cầu chuyển tiền. "
+            "Không chuyển tiền và hãy xác minh độc lập.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.LOW_RISK,
+        ),
+        (
+            "Không cung cấp mã OTP. Hãy nhập mã OTP tại "
+            "https://verify.example/now.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Người A: Tôi là công an.\n"
+            "Người B: Hãy chuyển tiền ngay, nếu không sẽ bị bắt.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+        (
+            "Người gửi: Tôi là công an.\n"
+            "Người gửi: Chuyển tiền ngay, nếu không sẽ bị bắt.",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Thông báo chung, không có yêu cầu hành động hay thông tin nhạy cảm.",
+            RiskLevel.INSUFFICIENT_DATA,
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+    ],
+    ids=[
+        "quoted-scam-in-article",
+        "anti-scam-warning",
+        "negation-does-not-hide-later-request",
+        "do-not-combine-different-speakers",
+        "combine-repeated-same-sender",
+        "insufficient-context",
+    ],
+)
+def test_context_and_speaker_boundaries(content, model_risk, expected):
+    result = analyze_synthetic_content(content, model_risk)
+
+    assert result.risk_level == expected
+
+
+def test_model_findings_from_different_speakers_are_not_combined():
+    result = analyze_synthetic_content(
+        "Người A: Tôi là công an.\n"
+        "Người B: Chuyển tiền ngay.\n"
+        "Người C: Nếu không sẽ bị bắt.",
+        RiskLevel.HIGH_RISK,
+        findings=[
+            ("AUTHORITY_IMPERSONATION", "Tôi là công an"),
+            ("UNUSUAL_PAYMENT_REQUEST", "Chuyển tiền ngay"),
+            ("THREATENED_CONSEQUENCES", "Nếu không sẽ bị bắt"),
+        ],
+    )
+
+    assert result.risk_level == RiskLevel.SUSPICIOUS
+
+
+def test_preview_acceptance_familiar_message_is_low_risk():
+    result = analyze_synthetic_content(
+        "Mẹ ơi, tối nay con ghé thăm nhà. Mẹ nhớ nghỉ ngơi nhé.",
+        RiskLevel.LOW_RISK,
+    )
+
+    assert result.risk_level == RiskLevel.LOW_RISK
+    assert result.detected_behaviors == []
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (
+            "Vui long nhap ma OTP tai https://verify.example/now.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Vui lòng nhập\nmã OTP tại https://verify.example/now.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Vui lòng   nhập mã OTP tại https://verify.example/now.",
+            RiskLevel.HIGH_RISK,
+        ),
+        (
+            "Hãy điền mã bảo mật tại https://verify.example/now.",
+            RiskLevel.HIGH_RISK,
+        ),
+    ],
+    ids=[
+        "no-diacritics",
+        "wrapped-line",
+        "repeated-whitespace",
+        "credential-phrase-variant",
+    ],
+)
+def test_sensitive_request_language_variants(content, expected):
+    result = analyze_synthetic_content(content, RiskLevel.SUSPICIOUS)
+
+    assert result.risk_level == expected
+    assert all(item.evidence in content for item in result.detected_behaviors)
+
+
+@pytest.mark.parametrize(
+    ("content", "finding_evidence", "model_risk", "expected"),
+    [
+        (
+            "Tin nhắn yêu cầu kiểm tra lại nội dung.",
+            "Tin nhắn yêu cầu cung cấp mã OTP ngay",
+            RiskLevel.HIGH_RISK,
+            RiskLevel.INSUFFICIENT_DATA,
+        ),
+        (
+            "Tôi là công an. Chuyển tiền ngay, nếu không sẽ bị bắt.",
+            "Chuyển tiền ngay",
+            RiskLevel.SUSPICIOUS,
+            RiskLevel.HIGH_RISK,
+        ),
+    ],
+    ids=["reject-fabricated-evidence", "source-evidence-over-model-risk"],
+)
+def test_risk_calibration_requires_verified_source_evidence(
+    content, finding_evidence, model_risk, expected
+):
+    result = analyze_synthetic_content(
+        content,
+        model_risk,
+        findings=[("CREDENTIAL_OTP_THEFT", finding_evidence)],
+    )
+
+    assert result.risk_level == expected
+    if expected == RiskLevel.HIGH_RISK:
+        assert all(item.evidence in content for item in result.detected_behaviors)
 
 
 def test_image_without_readable_text_is_not_reported_as_low_risk():
@@ -1318,13 +1654,18 @@ def test_gemini_provider_sends_image_inline_and_validates_response():
 def test_sensitive_data_is_redacted_before_provider_call():
     redacted = redact_sensitive_data(
         "Liên hệ user@example.com hoặc số 0912345678; mã OTP: 123456; "
-        "CCCD: 012345678901"
+        "CCCD: 012345678901; số thẻ: 4111111111111111; CVV: 123; "
+        "PIN: 9876; ngày hết hạn: 12/29"
     )
 
     assert "user@example.com" not in redacted
     assert "0912345678" not in redacted
     assert "123456" not in redacted
     assert "012345678901" not in redacted
+    assert "4111111111111111" not in redacted
+    assert "123" not in redacted
+    assert "9876" not in redacted
+    assert "12/29" not in redacted
     assert "[EMAIL_ẨN]" in redacted
 
 

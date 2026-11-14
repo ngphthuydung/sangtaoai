@@ -45,6 +45,8 @@ def calculate_metrics(records: Iterable[EvaluationRecord]) -> dict[str, object]:
     false_positive = matrix["NOT_SCAM"]["SCAM"]
     false_negative = matrix["SCAM"]["NOT_SCAM"] + matrix["SCAM"]["UNRESOLVED"]
     actual_scams = true_positive + false_negative
+    actual_not_scams = sum(matrix["NOT_SCAM"].values())
+    unresolved = matrix["SCAM"]["UNRESOLVED"] + matrix["NOT_SCAM"]["UNRESOLVED"]
     return {
         "cases": count,
         "scam_precision": (
@@ -54,6 +56,10 @@ def calculate_metrics(records: Iterable[EvaluationRecord]) -> dict[str, object]:
         ),
         "scam_recall": true_positive / actual_scams if actual_scams else 0.0,
         "false_negative_rate": false_negative / actual_scams if actual_scams else 0.0,
+        "false_positive_rate": (
+            false_positive / actual_not_scams if actual_not_scams else 0.0
+        ),
+        "insufficient_data_cases": unresolved,
         "confusion_matrix": matrix,
         "unresolved_is_counted_as_false_negative": True,
     }
